@@ -1,0 +1,18 @@
+{
+  "name": "off-fashion-platform",
+  "private": true,
+  "workspaces": [
+    "apps/storefront",
+    "apps/admin",
+    "apps/api",
+    "packages/shared-types"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @off/storefront",
+    "dev:all": "pnpm --parallel --filter @off/storefront --filter @off/admin --filter @off/api run dev",
+    "dev:storefront": "npm run dev --workspace @off/storefront",
+    "dev:admin": "npm run dev --workspace @off/admin",
+    "dev:api": "npm run dev --workspace @off/api",
+    "build": "npm run build --workspace @off/storefront && npm run build --workspace @off/admin && npm run build --workspace @off/api"
+  }
+}

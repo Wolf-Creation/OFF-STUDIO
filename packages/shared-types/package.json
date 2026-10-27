@@ -1,0 +1,16 @@
+{
+  "name": "@off/shared-types",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts"
+    },
+    "./tunisia-locations": {
+      "types": "./tunisia-locations.d.ts",
+      "default": "./tunisia-locations.js"
+    }
+  }
+}
