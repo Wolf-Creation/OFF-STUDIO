@@ -1,14 +1,20 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type WheelEvent as ReactWheelEvent } from 'react'
+import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type WheelEvent as ReactWheelEvent } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ClerkProvider, useAuth, useUser } from '@clerk/react'
-import { ArrowDown, ArrowLeft, ArrowRight, Check, Heart, Menu, Minus, Plus, Search, ShoppingBag, UserRound, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, Heart, Instagram, LoaderCircle, Menu, Minus, Plus, Search, ShoppingBag, UserRound, X } from 'lucide-react'
 import type { ApiCategory, ApiProduct, ApiResponse, CashOnDeliveryOrderRequest, CashOnDeliveryOrderResponse, ProductVariant, StoreCollection, StoreContent } from '@off/shared-types'
 import { TUNISIA_LOCATIONS } from '@off/shared-types/tunisia-locations'
 import { CustomerAccountExperience } from './CustomerAccountExperience'
-import { AnimatedLogo } from './AnimatedLogo'
+import { AnimatedLogo2 } from './AnimatedLogo2'
 
 export type Product = { id: string; slug: string; name: string; price: number; category: string; color: string; image: string; gallery: string[]; heroImage?: string; secondary: string; sizes: string[]; variants: ProductVariant[]; createdAt?: string; isNew?: boolean }
+type SelectionCardSettings = { title: string; description: string; productId: string; collectionId: string; background: string; destination: string }
+const defaultSelectionCards = [
+  { title: 'MEN', description: 'A considered uniform.', slug: 'leather-jacket', background: '#e5e2dc' },
+  { title: 'WOMEN', description: 'Form meets function.', slug: 'distressed-denim-jeans', background: '#e5e2dc' },
+  { title: 'ACCESSORIES', description: 'The finishing pieces.', slug: 'ma-cap', background: '#d9d5cb' },
+]
 type BagItem = { productId: string; quantity: number; size: string; color: string; sku: string; name: string; price: number; image: string }
 type CheckoutSavedAddress = { _id: string; label: string; fullName: string; phoneNumber: string; addressLine1: string; addressLine2: string; city: string; postalCode: string; country: string; governorate: string; delegation: string; isDefault: boolean }
 type CheckoutFormValues = { email: string; firstName: string; lastName: string; phoneNumber: string; line1: string; line2: string; postalCode: string; governorate: string; delegation: string }
@@ -16,6 +22,8 @@ type Category = { id: string; name: string; slug: string; image: string; product
 type CatalogState = { products: Product[]; categories: Category[]; collections: StoreCollection[]; content: StoreContent; homeSections: { id: string; type: string; title: string; enabled: boolean; order: number; settings: Record<string, unknown> }[]; websiteSettings: Record<string, unknown>; navigation: { headerItems: { label: string; destination: string; enabled: boolean }[]; footerGroups: { title: string; links: { label: string; destination: string }[] }[] } | null; loading: boolean; error: string; reload: () => void }
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api/v1'
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY?.trim() ?? ''
+const ORBIT_STEP_DURATION_MS = 8000
+const FAST_ORBIT_STEP_DURATION_MS = 1000
 const heroCutouts: Record<string, string> = {
   'logo-t-shirt': '/hero-ai/logo-t-shirt-ai.png',
   'ma-quaad-jacket': '/slider/ma-quaad-jacket.png',
@@ -27,11 +35,18 @@ const heroCutouts: Record<string, string> = {
 const productAlphaPixels = new WeakMap<HTMLImageElement, Uint8ClampedArray>()
 
 function isVisibleProductPixel(image: HTMLImageElement, clientX: number, clientY: number) {
-  const bounds = image.getBoundingClientRect()
-  if (!bounds.width || !bounds.height || image.naturalWidth === 0 || image.naturalHeight === 0) return false
-  const x = Math.floor((clientX - bounds.left) / bounds.width * 128)
-  const y = Math.floor((clientY - bounds.top) / bounds.height * 128)
-  if (x < 0 || x >= 128 || y < 0 || y >= 128) return false
+  const bounds = getContainedImageBounds(image)
+  if (!bounds || image.naturalWidth === 0 || image.naturalHeight === 0) return false
+  const xRatio = (clientX - bounds.left) / bounds.width
+  const yRatio = (clientY - bounds.top) / bounds.height
+  if (xRatio < 0 || xRatio >= 1 || yRatio < 0 || yRatio >= 1) return false
+  const scale = 128 / Math.max(image.naturalWidth, image.naturalHeight)
+  const imageWidth = image.naturalWidth * scale
+  const imageHeight = image.naturalHeight * scale
+  const offsetX = (128 - imageWidth) / 2
+  const offsetY = (128 - imageHeight) / 2
+  const x = Math.floor(offsetX + xRatio * imageWidth)
+  const y = Math.floor(offsetY + yRatio * imageHeight)
   try {
     let pixels = productAlphaPixels.get(image)
     if (!pixels) {
@@ -40,7 +55,7 @@ function isVisibleProductPixel(image: HTMLImageElement, clientX: number, clientY
       canvas.height = 128
       const context = canvas.getContext('2d', { willReadFrequently: true })
       if (!context) return true
-      context.drawImage(image, 0, 0, 128, 128)
+      context.drawImage(image, offsetX, offsetY, imageWidth, imageHeight)
       pixels = context.getImageData(0, 0, 128, 128).data
       productAlphaPixels.set(image, pixels)
     }
@@ -48,6 +63,43 @@ function isVisibleProductPixel(image: HTMLImageElement, clientX: number, clientY
   } catch {
     return true
   }
+}
+function getVisibleProductImageAtPoint(clientX: number, clientY: number) {
+  return document.elementsFromPoint(clientX, clientY).find(
+    (element): element is HTMLImageElement =>
+      element instanceof HTMLImageElement &&
+      element.matches('.hero-showcase-image') &&
+      isVisibleProductPixel(element, clientX, clientY),
+  ) ?? null
+}
+type ImageBounds = { left: number; top: number; width: number; height: number }
+const getContainedImageBounds = (image: HTMLImageElement): ImageBounds | null => {
+  const bounds = image.getBoundingClientRect()
+  if (!bounds.width || !bounds.height || !image.naturalWidth || !image.naturalHeight) return null
+  const imageRatio = image.naturalWidth / image.naturalHeight
+  const boundsRatio = bounds.width / bounds.height
+  const width = boundsRatio > imageRatio ? bounds.height * imageRatio : bounds.width
+  const height = boundsRatio > imageRatio ? bounds.height : bounds.width / imageRatio
+  return {
+    left: bounds.left + (bounds.width - width) / 2,
+    top: bounds.top + (bounds.height - height) / 2,
+    width,
+    height,
+  }
+}
+function getHeroProductImageAtPoint(clientX: number, clientY: number) {
+  const visibleImage = getVisibleProductImageAtPoint(clientX, clientY)
+  if (visibleImage) return visibleImage
+  return [...document.querySelectorAll<HTMLImageElement>(
+    '.hero-showcase-item:not(.hero-showcase-item--active) .hero-showcase-image',
+  )].find(image => {
+    const bounds = getContainedImageBounds(image)
+    return bounds
+      && clientX >= bounds.left
+      && clientX <= bounds.left + bounds.width
+      && clientY >= bounds.top
+      && clientY <= bounds.top + bounds.height
+  }) ?? null
 }
 const defaultContent: StoreContent = {
   announcement: 'Complimentary shipping on orders over 500 TND',
@@ -178,6 +230,7 @@ function Header({ bagCount, onOpenCart }: { bagCount: number; onOpenCart: () => 
   const [open, setOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [clockTime, setClockTime] = useState(() => new Date())
   const location = useLocation()
   const navigate = useNavigate()
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase()
@@ -185,17 +238,31 @@ function Header({ bagCount, onOpenCart }: { bagCount: number; onOpenCart: () => 
   const navItems = navigation?.headerItems.filter(item => item.enabled) ?? [['Shop all', '/shop', true], ['Collections', '/collections', true], ['About OFF', '/about', true], ['Contact', '/about', true]].map(([label, destination, enabled]) => ({ label: String(label), destination: String(destination), enabled: Boolean(enabled) }))
   const announcementPalette: Record<string, { background: string; color: string }> = { dark: { background: '#171918', color: '#fff' }, sage: { background: '#eaf2ec', color: '#304638' }, sand: { background: '#e9e1d5', color: '#39352e' }, white: { background: '#fff', color: '#171918' } }
   const announcementSource = typeof websiteSettings.announcement === 'string' ? websiteSettings.announcement : content.announcement
-  const announcementMessages = (content.advertisementMessages?.length ? content.advertisementMessages : [announcementSource]).map(message => message.replace(
-    /((?:complimentary|free)\s+shipping\s+on\s+orders\s+over\s+)[\d.,]+\s*(?:TND|DT)?/i,
-    (_match, prefix: string) => `${prefix}${formatTnd(content.freeShippingThreshold)}`,
-  )).filter(Boolean)
+  const announcementMessages = (content.advertisementMessages?.length ? content.advertisementMessages : [announcementSource]).filter(Boolean)
   const announcementVisible = websiteSettings.announcementEnabled !== false && announcementMessages.length > 0
   const announcementDestination = String(websiteSettings.announcementDestination ?? '')
+  const announcementClockParts = new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Africa/Tunis',
+  }).formatToParts(clockTime)
+  const announcementHour = announcementClockParts.find(part => part.type === 'hour')?.value ?? ''
+  const announcementMinute = announcementClockParts.find(part => part.type === 'minute')?.value ?? ''
+  const announcementPeriod = announcementClockParts.find(part => part.type === 'dayPeriod')?.value ?? ''
   const renderAnnouncementGroup = (duplicate = false) => <span className="store-announcement-group" aria-hidden={duplicate || undefined}>{announcementMessages.map((message, index) => <span className="store-announcement-item" key={`${index}-${message}`}>{message}</span>)}</span>
   const announcementTicker = <div className={`store-announcement${announcementMessages.length > 1 ? ' is-animated' : ''}`} role="region" aria-label="Store announcements" style={announcementPalette[String(websiteSettings.announcementBackground ?? 'dark')] ?? announcementPalette.dark}>
     <div className="store-announcement-track">{renderAnnouncementGroup()}{announcementMessages.length > 1 && renderAnnouncementGroup(true)}</div>
+    <time className="store-announcement-clock" dateTime={clockTime.toISOString()}>
+      <span className="store-announcement-clock-time">{announcementHour}:{announcementMinute}</span>
+      <span className="store-announcement-clock-period">{announcementPeriod}</span>
+    </time>
   </div>
   useEffect(() => { setOpen(false); setSearchOpen(false); setSearchQuery('') }, [location.pathname])
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockTime(new Date()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
   useEffect(() => {
     let frame = 0
     const measureHeight = () => {
@@ -225,7 +292,7 @@ function Header({ bagCount, onOpenCart }: { bagCount: number; onOpenCart: () => 
     {announcementVisible && (announcementDestination && /^https:\/\//i.test(announcementDestination) ? <a className="store-announcement-link" href={announcementDestination} target="_blank" rel="noreferrer">{announcementTicker}</a> : announcementDestination ? <Link className="store-announcement-link" to={announcementDestination}>{announcementTicker}</Link> : announcementTicker)}
     <header className="store-header" style={{ '--off-logo-size': `${Math.min(32, Math.max(18, Number(websiteSettings.logoSize ?? 22)))}px` } as CSSProperties}>
       <button className="icon-button header-menu-toggle" aria-label="Open navigation" onClick={() => setOpen(true)}><Menu size={17} strokeWidth={1.5} /></button>
-      <AnimatedLogo />
+      <Link className="store-header-logo-link" to="/" aria-label="OFF home"><AnimatedLogo2 className="store-header-logo-motion" loop /></Link>
       <nav className="header-navigation" aria-label="Main navigation">
         {navItems.map(({ label, destination }) => /^https:\/\//i.test(destination)
           ? <a key={`${label}-${destination}`} href={destination} target="_blank" rel="noreferrer">{label}</a>
@@ -245,6 +312,7 @@ function Header({ bagCount, onOpenCart }: { bagCount: number; onOpenCart: () => 
         <Logo />
         <div className="drawer-links">{navItems.map(({ label, destination }) => /^https:\/\//i.test(destination) ? <a key={`${label}-${destination}`} href={destination} target="_blank" rel="noreferrer">{label}<ArrowRight size={15} /></a> : <NavLink key={`${label}-${destination}`} to={destination}>{label}<ArrowRight size={15} /></NavLink>)}</div>
         <div className="nav-drawer-utility">
+          {CLERK_PUBLISHABLE_KEY && <NavDrawerGreeting />}
           {websiteSettings.showAccount !== false && <NavLink className="nav-drawer-utility-link" to="/account"><UserRound size={17} strokeWidth={1.5} /><span>Account</span></NavLink>}
           {CLERK_PUBLISHABLE_KEY ? <AuthenticatedWishlistHeaderLink className="nav-drawer-utility-link" showLabel /> : <NavLink className="nav-drawer-utility-link" aria-label="Wishlist" to="/wishlist"><Heart size={17} strokeWidth={1.5} /><span>Wishlist</span></NavLink>}
         </div>
@@ -252,6 +320,13 @@ function Header({ bagCount, onOpenCart }: { bagCount: number; onOpenCart: () => 
       </nav>
     </div>}
   </>
+}
+
+function NavDrawerGreeting() {
+  const { user, isLoaded, isSignedIn } = useUser()
+  if (!isLoaded || !isSignedIn || !user) return null
+  const username = user.firstName || user.username || user.primaryEmailAddress?.emailAddress.split('@')[0] || 'there'
+  return <p className="nav-drawer-greeting">Hello {username} 👋</p>
 }
 
 function AuthenticatedWishlistHeaderLink({ className, showLabel = false }: { className: string; showLabel?: boolean }) {
@@ -263,8 +338,7 @@ function AuthenticatedWishlistHeaderLink({ className, showLabel = false }: { cla
     : <Link className={className} aria-label="Wishlist" to={destination}>{content}</Link>
 }
 
-function Footer({ newsletterEnabled = true, announcement = '' }: { newsletterEnabled?: boolean; announcement?: string }) {
-  const [subscribed, setSubscribed] = useState(false)
+function Footer({ announcement = '' }: { announcement?: string }) {
   const { content, websiteSettings, navigation } = useCatalog()
   const groups = navigation?.footerGroups.length ? navigation.footerGroups : [{
     title: 'Explore',
@@ -281,19 +355,46 @@ function Footer({ newsletterEnabled = true, announcement = '' }: { newsletterEna
     ['Facebook', websiteSettings.facebookUrl],
     ['TikTok', websiteSettings.tiktokUrl],
   ].filter((item): item is [string, string] => typeof item[1] === 'string' && /^https:\/\//i.test(item[1]))
-  return <footer className="store-footer">
+  const marqueeWords = ['Outside the frame', 'Unordinary', 'Considered', 'Lived-in', 'Raw edge', 'Made with intention']
+  return <>
+  <section className="footer-marquee" aria-label="Outside the frame. Unordinary. Considered. Lived-in. Raw edge. Made with intention.">
+    <div className="footer-marquee-track" aria-hidden="true">
+      {[0, 1].map(copy => <div className="footer-marquee-group" key={copy}>{marqueeWords.map((word, index) => <span className={`footer-marquee-word${index % 2 ? ' is-italic' : ''}`} key={word}>{word}<i className="footer-marquee-capsule" /></span>)}</div>)}
+    </div>
+  </section>
+  <footer className="store-footer">
     <div className="footer-top">
-      <div className="footer-brand"><Logo /><p>Considered pieces.<br />Made to be lived in.</p></div>
+      <div className="footer-brand"><Logo light /><p>Considered pieces.<br />Made to be lived in.</p></div>
       {groups.map((group, groupIndex) => <nav className="footer-link-group" aria-label={group.title || `Footer links ${groupIndex + 1}`} key={`${group.title}-${groupIndex}`}>
         <h2>{group.title}</h2>
         {group.links.map((item, linkIndex) => /^https:\/\//i.test(item.destination)
           ? <a key={`${item.destination}-${linkIndex}`} href={item.destination} target="_blank" rel="noreferrer">{item.label}</a>
           : <Link key={`${item.destination}-${linkIndex}`} to={item.destination}>{item.label}</Link>)}
       </nav>)}
-      {newsletterEnabled && <form onSubmit={event => { event.preventDefault(); setSubscribed(true) }}><label htmlFor="newsletter">{String(websiteSettings.newsletterHeading ?? 'Join the OFF list')}</label><div className="newsletter-field"><input id="newsletter" type="email" placeholder="Email address" required /><button aria-label="Subscribe"><ArrowRight size={17} /></button></div>{subscribed && <small>Thank you for joining us.</small>}</form>}
     </div>
     {announcement && <p className="store-footer-announcement">{announcement}</p>}<div className="footer-bottom"><span>{String(websiteSettings.copyright ?? '© 2025 OFF. All rights reserved.')}</span><div>{socialLinks.map(([label, url]) => <a key={label} href={url} target="_blank" rel="noreferrer">{label}</a>)}</div><span>{supportEmail ? <a href={`mailto:${supportEmail}`}>{supportEmail}</a> : 'Made with intention'}</span></div>
   </footer>
+  </>
+}
+
+function NewsletterSignupSection({ heading, description }: { heading: string; description: string }) {
+  const [subscribed, setSubscribed] = useState(false)
+  return <section className="section cms-newsletter">
+    <div className="cms-newsletter-content">
+      <p className="eyebrow">OFF / NOTES</p>
+      <h2>{heading}</h2>
+      <p>{description}</p>
+      <form onSubmit={event => { event.preventDefault(); setSubscribed(true) }}>
+        <label className="sr-only" htmlFor="cms-newsletter-email">Email address</label>
+        <div className="newsletter-field">
+          <input id="cms-newsletter-email" type="email" placeholder="Email address" required />
+          <button type="submit">Subscribe <ArrowRight size={16} /></button>
+        </div>
+        {subscribed && <small role="status">Thank you for joining us.</small>}
+      </form>
+    </div>
+    <div className="cms-newsletter-mark-panel"><div className="cms-newsletter-mark" aria-hidden="true"><img src="/off-logo.svg" alt="" /><span /></div></div>
+  </section>
 }
 
 function WhatsAppFloatingButton() {
@@ -303,7 +404,26 @@ function WhatsAppFloatingButton() {
   return <a className="whatsapp-float" href={`https://wa.me/${phone}`} target="_blank" rel="noreferrer" aria-label="Contact OFF on WhatsApp"><span className="whatsapp-float-ring" aria-hidden="true" /><svg className="whatsapp-brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path className="whatsapp-chat-mark" d="M20.2 11.6a8.2 8.2 0 0 1-12.1 7.2L3 20l1.3-4.7a8.2 8.2 0 1 1 15.9-3.7Z" /><path className="whatsapp-phone-cutout" d="M8.3 7.9c.2-.4.4-.4.7-.4h.5c.2 0 .4 0 .5.4l.8 1.9c.1.2.1.4 0 .5l-.6.7c-.2.2-.2.4-.1.6.5.9 1.2 1.6 2.1 2.1.2.1.4.1.6-.1l.7-.8c.2-.2.4-.2.6-.1l1.8.9c.3.1.4.3.3.6-.1.6-.4 1.2-.9 1.5-.5.4-1.1.5-1.8.3-1-.3-2.3-.9-3.6-2.1-1.1-1-2-2.4-2.3-3.4-.3-.9-.1-1.8.3-2.6.1-.2.3-.4.4-.5Z" /></svg></a>
 }
 
-function ProductCard({ product, showPrice = true, liked: controlledLiked, onWishlistToggle }: { product: Product; showPrice?: boolean; liked?: boolean; onWishlistToggle?: () => void }) {
+function HeroLoadingIndicator() {
+  return <span className="hero-loading-indicator" role="status" aria-label="Loading products">
+    <LoaderCircle size={34} strokeWidth={1.4} aria-hidden="true" />
+  </span>
+}
+
+function ProductLoadingIndicator() {
+  return <span className="product-loading-indicator" aria-hidden="true">
+    <LoaderCircle size={26} strokeWidth={1.5} />
+  </span>
+}
+
+function ProductLoadingCard() {
+  return <article className="product-card product-card-loading" aria-hidden="true">
+    <div className="product-image-wrap product-image-loading"><ProductLoadingIndicator /></div>
+    <div className="product-meta"><span className="product-loading-line" /><span className="product-loading-line product-loading-line-short" /></div>
+  </article>
+}
+
+function ProductCard({ product, showPrice = true, liked: controlledLiked, onWishlistToggle, imageLoading = false }: { product: Product; showPrice?: boolean; liked?: boolean; onWishlistToggle?: () => void; imageLoading?: boolean }) {
   const [localLiked, setLocalLiked] = useState(false)
   const guestWishlist = useContext(GuestWishlistContext)
   const liked = controlledLiked ?? guestWishlist?.ids.includes(product.id) ?? localLiked
@@ -312,10 +432,118 @@ function ProductCard({ product, showPrice = true, liked: controlledLiked, onWish
     else if (guestWishlist) guestWishlist.toggle(product.id)
     else setLocalLiked(value => !value)
   }
+  const cardImage = product.heroImage || product.image
   return <article className="product-card">
-    <Link to={`/product/${product.id}`} className="product-image-wrap"><img src={product.image} alt={product.name} loading="lazy" /><button className={`favorite ${liked ? 'is-liked' : ''}`} aria-label={liked ? 'Remove from wishlist' : 'Add to wishlist'} onClick={event => { event.preventDefault(); toggleWishlist() }}><Heart size={16} strokeWidth={1.4} fill={liked ? 'currentColor' : 'none'} /></button>{product.isNew && <span className="product-tag">New arrival</span>}</Link>
+    <Link to={`/product/${product.id}`} className={`product-image-wrap${product.heroImage ? ' has-cutout' : ''}${imageLoading ? ' product-image-loading' : ''}`}>{imageLoading ? <ProductLoadingIndicator /> : <img src={cardImage} alt={product.name} loading="lazy" />}<button className={`favorite ${liked ? 'is-liked' : ''}`} aria-label={liked ? 'Remove from wishlist' : 'Add to wishlist'} onClick={event => { event.preventDefault(); toggleWishlist() }}><Heart size={16} strokeWidth={1.4} fill={liked ? 'currentColor' : 'none'} /></button>{product.isNew && <span className="product-tag">New arrival</span>}</Link>
     <div className="product-meta"><Link to={`/product/${product.id}`}><span>{product.name}</span>{showPrice && <span>{formatTnd(product.price)}</span>}</Link><small>{product.category} · {product.color}</small></div>
   </article>
+}
+
+function HomeSelectionCards({ cards, products, collections = [], imageLoading = false }: { cards: SelectionCardSettings[]; products: Product[]; collections?: StoreCollection[]; imageLoading?: boolean }) {
+  return <div className="selection-cards">
+    {cards.map((card, index) => {
+      const product = products.find(item => item.id === card.productId)
+      const collection = collections.find(item => item._id === card.collectionId)
+      const fallbackImage = ['/hero-ai/leather-jacket-ai.png', '/hero-ai/distressed-denim-jeans-ai.png', '/hero-ai/ma-cap-ai.png'][index]
+      const href = card.destination || (collection ? `/shop?collection=${encodeURIComponent(collection.slug)}` : product ? `/product/${product.slug || product.id}` : '/shop')
+      const background = card.background || ['#e5e2dc', '#e5e2dc', '#d9d5cb'][index]
+      const foreground = background.toLowerCase() === '#111111' ? '#fff' : '#171715'
+      return <Link className="selection-card" key={`${card.title}-${index}`} to={href} style={{ '--selection-background': background, '--selection-foreground': foreground } as CSSProperties}>
+        <span className="selection-card-copy"><b>{card.title}</b><small>{card.description}</small></span>
+        {imageLoading ? <span className="selection-card-loading-image" aria-hidden="true" /> : <img src={product?.heroImage || fallbackImage} alt={product?.name || card.title} loading="lazy" />}
+        <span className="selection-card-arrow" aria-hidden="true"><ArrowRight size={19} strokeWidth={1.5} /></span>
+      </Link>
+    })}
+  </div>
+}
+
+function getSelectionCards(settings: Record<string, unknown>, products: Product[], collections: StoreCollection[] = []): SelectionCardSettings[] {
+  if (Array.isArray(settings.selectionCards) && settings.selectionCards.length === 3) {
+    return settings.selectionCards.map((card, index) => {
+      const item = card && typeof card === 'object' ? card as Record<string, unknown> : {}
+      const productId = String(item.productId ?? '')
+      const titleSlug = String(item.title ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      const productCollections = collections.filter(collection => collection.productIds.includes(productId))
+      const specificProductCollections = productCollections.filter(collection => (collection.productCount ?? collection.productIds.length) < products.length)
+      const linkedCollection = collections.find(collection => collection._id === String(item.collectionId ?? ''))
+        ?? collections.find(collection => collection.slug === titleSlug)
+        ?? (specificProductCollections.length === 1 ? specificProductCollections[0] : undefined)
+      return {
+        title: String(item.title ?? defaultSelectionCards[index].title),
+        description: String(item.description ?? defaultSelectionCards[index].description),
+        productId,
+        collectionId: linkedCollection?._id ?? '',
+        background: String(item.background ?? defaultSelectionCards[index].background),
+        destination: String(item.destination ?? ''),
+      }
+    })
+  }
+  return defaultSelectionCards.map(card => ({
+    title: card.title,
+    description: card.description,
+    productId: products.find(product => product.slug === card.slug)?.id ?? '',
+    collectionId: collections.find(collection => collection.slug === card.title.toLowerCase())?._id ?? '',
+    background: card.background,
+    destination: '',
+  }))
+}
+
+type InstagramPost = { imageUrl: string; postUrl?: string }
+
+function InstagramFeedSection({ settings = {} }: { settings?: Record<string, unknown> }) {
+  const { websiteSettings } = useCatalog()
+  const instagramUrlValue = [settings.instagramUrl, websiteSettings.instagramUrl]
+    .find(value => typeof value === 'string' && /^https:\/\//i.test(value))
+  const instagramUrl = typeof instagramUrlValue === 'string'
+    ? instagramUrlValue
+    : ''
+  const fallbackPosts = [
+    { image: '/hero-ai/logo-t-shirt-ai.png', alt: 'OFF logo T-shirt' },
+    { image: '/hero-ai/ma-cap-ai.png', alt: 'OFF cap' },
+    { image: '/hero-ai/distressed-denim-jeans-ai.png', alt: 'OFF denim' },
+    { image: '/hero-ai/leather-jacket-ai.png', alt: 'OFF leather jacket' },
+    { image: '/hero-ai/skeleton-sneakers-ai.png', alt: 'OFF sneakers' },
+    { image: '/slider/ma-quaad-jacket.png', alt: 'OFF jacket' },
+  ]
+  const hasSectionPosts = Array.isArray(settings.instagramPosts)
+  const configuredPosts: unknown[] = Array.isArray(settings.instagramPosts)
+    ? settings.instagramPosts as unknown[]
+    : Array.isArray(websiteSettings.instagramPosts) ? websiteSettings.instagramPosts as unknown[] : []
+  const posts = configuredPosts
+    .filter((post): post is InstagramPost => Boolean(post && typeof post === 'object' && typeof (post as InstagramPost).imageUrl === 'string' && (post as InstagramPost).imageUrl))
+    .slice(0, 12)
+    .map((post, index) => ({
+      image: publicMediaUrl(post.imageUrl),
+      alt: `OFF Instagram post ${index + 1}`,
+      href: typeof post.postUrl === 'string' && /^https:\/\//i.test(post.postUrl) ? post.postUrl : instagramUrl || '/shop',
+      external: Boolean((typeof post.postUrl === 'string' && /^https:\/\//i.test(post.postUrl)) || instagramUrl),
+    }))
+  const feedPosts = posts.length
+    ? posts
+    : hasSectionPosts ? [] : fallbackPosts.map(post => ({ ...post, href: instagramUrl || '/shop', external: Boolean(instagramUrl) }))
+  const eyebrow = typeof settings.eyebrow === 'string' ? settings.eyebrow : 'OFF / COMMUNITY'
+  const heading = typeof settings.heading === 'string' ? settings.heading : 'FOLLOW US'
+
+  return <section className="instagram-feed" aria-labelledby="instagram-feed-title">
+    <div className="instagram-feed-heading">
+      {eyebrow && <p className="eyebrow">{eyebrow}</p>}
+      <h2 id="instagram-feed-title">{heading}</h2>
+      {instagramUrl && <a className="text-link" href={instagramUrl} target="_blank" rel="noreferrer">Instagram <ArrowRight size={14} /></a>}
+    </div>
+    <div className="instagram-feed-window">
+      {[0, 1].map(copy => <div className="instagram-feed-track" key={copy} aria-hidden={copy === 1}>
+        {feedPosts.map((post, index) => <a
+          className="instagram-feed-card"
+          href={post.href}
+          target={post.external ? '_blank' : undefined}
+          rel={post.external ? 'noreferrer' : undefined}
+          aria-label={post.external ? `View ${post.alt} on Instagram` : `View ${post.alt}`}
+          tabIndex={copy === 1 ? -1 : undefined}
+          key={`${copy}-${index}`}
+        ><img src={post.image} alt={copy === 1 ? '' : post.alt} loading="lazy" /><span className="instagram-feed-overlay" aria-hidden="true"><Instagram size={34} strokeWidth={1.6} /></span></a>)}
+      </div>)}
+    </div>
+  </section>
 }
 
 function WishlistLanding() {
@@ -337,7 +565,7 @@ function GuestWishlistPage() {
 
 function Home({ addToBag }: { addToBag: (id: string, size: string, color: string, sku: string, quantity?: number) => boolean }) {
   const { products, categories, collections, content, homeSections, loading, error, reload } = useCatalog()
-  const homeSection = (type: string) => homeSections.find(section => section.type === type)
+  const homeSection = (type: string) => homeSections.find(section => section.enabled && section.type === type)
   const heroSection = homeSection('hero')
   const storedHeroSettings = heroSection?.settings ?? {}
   const hasLegacyCampaignCopy = storedHeroSettings.heading === 'ARTS DISTRICT LOS ANGELES'
@@ -359,10 +587,6 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
     const defaultLimit = 3
     return products.filter(product => product.image).sort((a, b) => Date.parse(b.createdAt ?? '') - Date.parse(a.createdAt ?? '')).slice(0, Number(section.settings.limit ?? defaultLimit))
   }
-  // The circular hero needs enough neighboring products to read as an orbit. Older CMS
-  // snapshots defaulted to three, so preserve explicit manual choices but expand automatic sets.
-  // The product orbit is the permanent homepage hero. A legacy CMS visibility flag
-  // previously hid the whole stage and left only a blank campaign shell.
   let selectedHeroProducts = selectSectionProducts(heroSection, products.filter((product) => product.image).slice(0, 3))
   const denimIndex = selectedHeroProducts.findIndex(product => product.slug === 'distressed-denim-jeans')
   const capProduct = products.find(product => product.slug === 'ma-cap' || product.name.trim().toLowerCase() === 'ma cap')
@@ -373,7 +597,6 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
   }
   const featuredProducts = selectedHeroProducts.map(product => {
     if (product.slug === 'ma-cap') return { ...product, heroImage: '/hero-ai/ma-cap-ai.png' }
-    // Product-specific AI renders are preferred over older CMS-uploaded cutouts.
     if (product.heroImage) return product
     const cutout = heroSettings.productImages && typeof heroSettings.productImages === 'object' ? (heroSettings.productImages as Record<string, string>)[product.id] : undefined
     if (!cutout) return product
@@ -382,13 +605,13 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
   })
   const arrivalsSection = homeSection('new-arrivals')
   const arrivalsProducts = selectSectionProducts(arrivalsSection, products.slice(0, 3))
-  const featuredSection = homeSection('featured-products')
-  const curatedProducts = selectSectionProducts(featuredSection, products.filter(product => product.isNew).slice(0, 3))
   const imageUrl = (value: unknown) => publicMediaUrl(typeof value === 'string' ? value : '')
   const [activeSlide, setActiveSlide] = useState(0)
   const [orbitRotation, setOrbitRotation] = useState(0)
+  const [isForwardRotation, setIsForwardRotation] = useState(true)
   const [dragDistance, setDragDistance] = useState(0)
   const [isInteracting, setIsInteracting] = useState(false)
+  const [isFastTransition, setIsFastTransition] = useState(false)
   const [pointerProductId, setPointerProductId] = useState<string | null>(null)
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null)
   const [quickViewColor, setQuickViewColor] = useState('')
@@ -396,62 +619,106 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
   const [quickViewQuantity, setQuickViewQuantity] = useState(1)
   const [quickViewMessage, setQuickViewMessage] = useState('')
   const [quickViewClosing, setQuickViewClosing] = useState(false)
+  const [quickViewReturning, setQuickViewReturning] = useState(false)
+  const [heroTitleTransition, setHeroTitleTransition] = useState<{ outgoingTitle: string; outgoingHref: string; direction: 'forward' | 'reverse'; id: number } | null>(null)
   const dragStartX = useRef<number | null>(null)
+  const heroSectionRef = useRef<HTMLElement | null>(null)
   const quickViewImageRef = useRef<HTMLImageElement | null>(null)
-  const quickViewOrigin = useRef<{ left: number; top: number; width: number; height: number } | null>(null)
+  const quickViewOrigin = useRef<ImageBounds | null>(null)
   const quickViewCloseTimer = useRef<number | null>(null)
+  const quickViewReturnFrame = useRef<number | null>(null)
+  const heroTitleTransitionTimer = useRef<number | null>(null)
   const wheelDistance = useRef(0)
   const ignoreProductClick = useRef(false)
   const hasDragged = useRef(false)
   const wheelTimer = useRef<number | null>(null)
 
+  const pauseHeroAnimations = () => {
+    heroSectionRef.current?.getAnimations({ subtree: true }).forEach(animation => animation.pause())
+  }
+  const resumeHeroAnimations = () => {
+    heroSectionRef.current?.getAnimations({ subtree: true }).forEach(animation => {
+      if (animation.playState === 'paused') animation.play()
+    })
+  }
+
   const closeQuickView = () => {
-    if (!quickViewProduct || quickViewClosing) return
-    const modalImage = quickViewImageRef.current
-    const heroImage = [...document.querySelectorAll<HTMLImageElement>('.hero-showcase-item[data-product-id] img')]
-      .find(image => image.closest<HTMLElement>('[data-product-id]')?.dataset.productId === quickViewProduct.id)
-    const from = modalImage?.getBoundingClientRect()
-    const to = heroImage?.getBoundingClientRect()
-    if (!modalImage || !heroImage || !from || !to || !from.width || !to.width) {
-      setQuickViewProduct(null)
-      setQuickViewClosing(false)
-      return
+    if (!quickViewProduct || quickViewClosing || quickViewReturnFrame.current !== null) return
+    const productId = quickViewProduct.id
+    const productIndex = featuredProducts.findIndex(product => product.id === productId)
+    if (productIndex >= 0) {
+      setQuickViewReturning(true)
+      setActiveSlide(productIndex)
+      setOrbitRotation(productIndex * (360 / Math.max(featuredProducts.length, 1)))
+      setDragDistance(0)
     }
-    const translateX = to.left + to.width / 2 - (from.left + from.width / 2)
-    const translateY = to.top + to.height / 2 - (from.top + from.height / 2)
-    const returnAnimation = modalImage.animate([
-      { transform: 'translate(0, 0) scale(1, 1)' },
-      { transform: `translate(${translateX}px, ${translateY}px) scale(${to.width / from.width}, ${to.height / from.height})` },
-    ], { duration: 760, easing: 'cubic-bezier(.2, .76, .22, 1)', fill: 'forwards' })
     setQuickViewClosing(true)
+    quickViewReturnFrame.current = window.requestAnimationFrame(() => {
+      quickViewReturnFrame.current = null
+      const modalImage = quickViewImageRef.current
+      const heroImage = [...document.querySelectorAll<HTMLImageElement>('.hero-showcase-item[data-product-id] img')]
+        .find(image => image.closest<HTMLElement>('[data-product-id]')?.dataset.productId === productId)
+      const from = modalImage?.getBoundingClientRect()
+      const to = heroImage ? getContainedImageBounds(heroImage) : null
+      if (!modalImage || !heroImage || !from || !to || !from.width || !from.height) {
+        setQuickViewProduct(null)
+        setQuickViewClosing(false)
+        setQuickViewReturning(false)
+        quickViewOrigin.current = null
+        return
+      }
+      const translateX = to.left + to.width / 2 - (from.left + from.width / 2)
+      const translateY = to.top + to.height / 2 - (from.top + from.height / 2)
+      const scale = Math.min(to.width / from.width, to.height / from.height)
+      const returnAnimation = modalImage.animate([
+        { transform: 'translate(0, 0) scale(1)' },
+        { transform: `translate(${translateX}px, ${translateY}px) scale(${scale})` },
+      ], { duration: 760, easing: 'cubic-bezier(.2, .76, .22, 1)', fill: 'forwards' })
     if (quickViewCloseTimer.current !== null) window.clearTimeout(quickViewCloseTimer.current)
     quickViewCloseTimer.current = window.setTimeout(() => {
       returnAnimation.cancel()
       heroImage.closest('button')?.blur()
       setQuickViewProduct(null)
       setQuickViewClosing(false)
+      setQuickViewReturning(false)
       quickViewOrigin.current = null
       quickViewCloseTimer.current = null
     }, 760)
+    })
   }
 
   useEffect(() => {
     setActiveSlide(0)
     setOrbitRotation(0)
+    setIsForwardRotation(true)
   }, [featuredProducts.length])
 
   useEffect(() => () => {
     if (wheelTimer.current !== null) window.clearTimeout(wheelTimer.current)
     if (quickViewCloseTimer.current !== null) window.clearTimeout(quickViewCloseTimer.current)
+    if (quickViewReturnFrame.current !== null) window.cancelAnimationFrame(quickViewReturnFrame.current)
+    if (heroTitleTransitionTimer.current !== null) window.clearTimeout(heroTitleTransitionTimer.current)
   }, [])
 
   useEffect(() => {
-    if (featuredProducts.length < 2 || quickViewProduct) return
-    const timer = window.setInterval(() => {
-      moveSlide(1)
-    }, 6200)
-    return () => window.clearInterval(timer)
-  }, [featuredProducts.length, quickViewProduct])
+    const updatePointerProduct = (event: PointerEvent) => {
+      const image = getHeroProductImageAtPoint(event.clientX, event.clientY)
+      const product = image && heroSectionRef.current?.contains(image)
+        ? image.closest<HTMLElement>('[data-product-id]')?.dataset.productId ?? null
+        : null
+      setPointerProductId(current => current === product ? current : product)
+    }
+    window.addEventListener('pointermove', updatePointerProduct)
+    return () => window.removeEventListener('pointermove', updatePointerProduct)
+  }, [])
+
+  useEffect(() => {
+    if (quickViewProduct) {
+      pauseHeroAnimations()
+      return
+    }
+    resumeHeroAnimations()
+  }, [quickViewProduct])
 
   useEffect(() => {
     if (!quickViewProduct) return
@@ -475,9 +742,10 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
     if (!destination.width || !destination.height) return
     const translateX = origin.left + origin.width / 2 - (destination.left + destination.width / 2)
     const translateY = origin.top + origin.height / 2 - (destination.top + destination.height / 2)
+    const scale = Math.min(origin.width / destination.width, origin.height / destination.height)
     const animation = image.animate([
-      { transform: `translate(${translateX}px, ${translateY}px) scale(${origin.width / destination.width}, ${origin.height / destination.height})` },
-      { transform: 'translate(0, 0) scale(1, 1)' },
+      { transform: `translate(${translateX}px, ${translateY}px) scale(${scale})` },
+      { transform: 'translate(0, 0) scale(1)' },
     ], { duration: 720, easing: 'cubic-bezier(.2, .76, .22, 1)', fill: 'both' })
     return () => animation.cancel()
   }, [quickViewProduct])
@@ -487,8 +755,7 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
   const quickViewVariant = quickViewProduct?.variants.find(variant => variant.active && variant.color === quickViewColor && variant.size === quickViewSize && variant.stock > 0)
   const openQuickView = (product: Product, button: HTMLButtonElement) => {
     const image = button.querySelector('img')
-    const bounds = image?.getBoundingClientRect()
-    quickViewOrigin.current = bounds ? { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height } : null
+    quickViewOrigin.current = image ? getContainedImageBounds(image) : null
     setQuickViewColor(product.variants.find(variant => variant.active)?.color ?? product.color)
     setQuickViewSize('')
     setQuickViewQuantity(1)
@@ -496,10 +763,53 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
     setQuickViewClosing(false)
     setQuickViewProduct(product)
   }
-  const moveSlide = (direction: number) => {
+  const moveSlide = (direction: number, speed: 'fast' | 'normal' = 'fast', showBackdropTitle = direction > 0) => {
+    if (!direction) return
+    const currentProduct = featuredProducts[activeSlide]
+    if (currentProduct && featuredProducts.length > 1) {
+      setHeroTitleTransition({
+        outgoingTitle: String(heroSettings.heading || currentProduct.name),
+        outgoingHref: `/product/${currentProduct.slug || currentProduct.id}`,
+        direction: direction > 0 ? 'forward' : 'reverse',
+        id: Date.now(),
+      })
+      if (heroTitleTransitionTimer.current !== null) window.clearTimeout(heroTitleTransitionTimer.current)
+      heroTitleTransitionTimer.current = window.setTimeout(() => {
+        setHeroTitleTransition(null)
+        heroTitleTransitionTimer.current = null
+      }, 520)
+    }
+    setIsFastTransition(speed === 'fast')
+    setIsForwardRotation(showBackdropTitle)
     setOrbitRotation((rotation) => rotation + direction * (360 / Math.max(featuredProducts.length, 1)))
     setActiveSlide((current) => ((current + direction) % featuredProducts.length + featuredProducts.length) % featuredProducts.length)
   }
+
+  const moveToProduct = (index: number) => {
+    if (index === activeSlide || featuredProducts.length < 2) return
+    const forwardDistance = (index - activeSlide + featuredProducts.length) % featuredProducts.length
+    const direction = forwardDistance > featuredProducts.length / 2 ? forwardDistance - featuredProducts.length : forwardDistance
+    moveSlide(direction, 'fast')
+  }
+
+  const navigateQuickView = (direction: number) => {
+    if (!quickViewProduct || featuredProducts.length < 2) return
+    const currentIndex = featuredProducts.findIndex(product => product.id === quickViewProduct.id)
+    if (currentIndex < 0) return
+    const nextIndex = (currentIndex + direction + featuredProducts.length) % featuredProducts.length
+    const nextProduct = featuredProducts[nextIndex]
+    const activeDistance = (nextIndex - activeSlide + featuredProducts.length) % featuredProducts.length
+    const slideDirection = activeDistance > featuredProducts.length / 2 ? activeDistance - featuredProducts.length : activeDistance
+    moveSlide(slideDirection, 'fast')
+    quickViewOrigin.current = null
+    setQuickViewColor(nextProduct.variants.find(variant => variant.active)?.color ?? nextProduct.color)
+    setQuickViewSize('')
+    setQuickViewQuantity(1)
+    setQuickViewMessage('')
+    setQuickViewProduct(nextProduct)
+  }
+
+  const getOrbitAngle = (index: number) => index * (360 / featuredProducts.length) - orbitRotation - dragDistance * (360 / featuredProducts.length) / 100
 
   const handleWheel = (event: ReactWheelEvent<HTMLElement>) => {
     if (featuredProducts.length < 2) return
@@ -510,7 +820,7 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
     const steps = Math.trunc(wheelDistance.current / 100)
     if (steps) {
       wheelDistance.current -= steps * 100
-      moveSlide(steps)
+      moveSlide(steps, 'fast')
     }
     setDragDistance(wheelDistance.current)
     setIsInteracting(true)
@@ -520,7 +830,7 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
       const roundedStep = Math.round(remainder / 100)
       const finalStep = roundedStep || (Math.abs(remainder) >= 18 ? Math.sign(remainder) : 0)
       wheelDistance.current = 0
-      if (finalStep) moveSlide(finalStep)
+      if (finalStep) moveSlide(finalStep, 'fast')
       setDragDistance(0)
       setIsInteracting(false)
       wheelTimer.current = null
@@ -530,13 +840,15 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
   return <><main className="home-page">
     <section
       className={`hero hero-product-slider${activeProduct ? ' has-product' : ''}${heroSettings.image ? ' has-campaign-image' : ''}`}
+      ref={heroSectionRef}
       aria-label="Featured products"
       onWheel={handleWheel}
       onPointerDown={event => {
         if (event.button !== 0) return
-        // Let the native click reach the hero controls; pointer capture on the
-        // section otherwise retargets the release and can swallow the click.
-        if (event.target instanceof Element && event.target.closest('.hero-slider-controls')) return
+        // Let native clicks reach the hero controls and product list; pointer
+        // capture on the section can otherwise swallow them.
+        if (event.target instanceof Element && event.target.closest('.hero-slider-controls, .hero-product-list')) return
+        resumeHeroAnimations()
         if (wheelTimer.current !== null) window.clearTimeout(wheelTimer.current)
         wheelTimer.current = null
         wheelDistance.current = 0
@@ -545,20 +857,13 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
         ignoreProductClick.current = false
         setDragDistance(0)
         setIsInteracting(true)
-        const productButton = event.target instanceof Element
-          ? event.target.closest<HTMLElement>('.hero-showcase-item')
-          : null
+        const hoveredProductImage = getHeroProductImageAtPoint(event.clientX, event.clientY)
+        const productButton = hoveredProductImage?.closest<HTMLElement>('.hero-showcase-item')
+          ?? (event.target instanceof Element ? event.target.closest<HTMLElement>('.hero-showcase-item') : null)
         const captureTarget = productButton ?? event.currentTarget
         captureTarget.setPointerCapture(event.pointerId)
       }}
       onPointerMove={event => {
-        const target = event.target
-        const hoveredImage = target instanceof HTMLImageElement && target.closest('.hero-showcase-item') ? target : null
-        const hoveredProduct = hoveredImage?.closest<HTMLElement>('[data-product-id]')
-        const nextPointerProduct = hoveredImage && isVisibleProductPixel(hoveredImage, event.clientX, event.clientY)
-          ? hoveredProduct?.dataset.productId ?? null
-          : null
-        setPointerProductId(current => current === nextPointerProduct ? current : nextPointerProduct)
         if (dragStartX.current === null) return
         const distance = dragStartX.current - event.clientX
         if (Math.abs(distance) > 8) hasDragged.current = true
@@ -566,7 +871,7 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
         if (steps) {
           const remainder = distance - steps * 100
           dragStartX.current = event.clientX + remainder
-          moveSlide(steps)
+          moveSlide(steps, 'fast')
           setDragDistance(remainder)
         } else {
           setDragDistance(distance)
@@ -580,7 +885,7 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
           ignoreProductClick.current = true
           window.setTimeout(() => { ignoreProductClick.current = false }, 350)
           const steps = Math.round(distance / 100)
-          if (steps) moveSlide(steps)
+          if (steps) moveSlide(steps, 'fast')
         }
         hasDragged.current = false
         setDragDistance(0)
@@ -590,49 +895,64 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
       onPointerLeave={() => setPointerProductId(null)}
     >
       {Boolean(heroSettings.image) && <picture className="hero-campaign-image">{Boolean(heroSettings.mobileImage) && <source media="(max-width: 700px)" srcSet={imageUrl(heroSettings.mobileImage)} />}<img src={imageUrl(heroSettings.image)} alt="" /></picture>}
-      <div className="hero-gradient" style={{ '--hero-overlay-opacity': `${Math.min(80, Math.max(0, Number(heroSettings.overlay ?? 20))) / 100}` } as CSSProperties}>
-        <svg className="hero-topographic-lines" viewBox="0 0 800 500" aria-hidden="true" focusable="false">
-          <g fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
-            <path d="M820 35C735 17 654 49 641 111c-13 59 42 89 42 145 0 57-63 92-143 103-68 9-137 33-154 94" />
-            <path d="M824 61C752 43 684 67 669 121c-15 55 36 82 37 133 1 61-61 105-143 117-61 9-119 29-140 85" />
-            <path d="M826 88c-58-15-117 3-135 48-21 52 27 75 29 123 3 63-58 115-142 131-55 10-103 25-126 72" />
-            <path d="M829 116c-48-12-96 0-117 41-25 49 18 69 20 114 3 62-57 119-141 143-49 14-86 24-111 61" />
-            <path d="M832 145c-38-9-77 0-99 35-29 46 9 64 12 106 4 61-54 122-139 154-43 16-69 22-96 50" />
-            <path d="M835 174c-28-6-58 1-81 30-33 42 1 58 4 98 5 60-51 122-137 164-36 17-53 20-81 40" />
-            <path d="M837 204c-19-4-39 2-62 24-36 37-7 51-4 89 4 57-48 120-135 172-29 17-36 18-65 30" />
-            <path d="M839 235c-9-1-20 4-43 19-38 31-15 44-12 79 4 54-44 117-132 179-20 14-19 15-48 20" />
-          </g>
-        </svg>
-      </div>
+      <div className="hero-gradient" style={{ '--hero-overlay-opacity': `${Math.min(80, Math.max(0, Number(heroSettings.overlay ?? 20))) / 100}` } as CSSProperties} />
       {activeProduct ? <>
-        <div className={`hero-showcase-stage${isInteracting ? ' is-interacting' : ''}`} aria-label="Selected product with neighboring pieces">
-          {featuredProducts.map((product, index) => {
+        {featuredProducts.length > 1 && <nav className="hero-product-list" aria-label="Featured products">
+          {featuredProducts.map((product, index) => <button
+            type="button"
+            className={index === activeSlide ? 'active' : ''}
+            key={product.id}
+            aria-current={index === activeSlide ? 'true' : undefined}
+            onClick={() => moveToProduct(index)}
+          ><span>{String(index + 1).padStart(2, '0')}</span><span>{product.name}</span></button>)}
+        </nav>}
+        {featuredProducts.map((product, index) => <p
+          className={`hero-backdrop-title${isForwardRotation ? ' is-forward' : ''}`}
+          aria-hidden="true"
+          key={`backdrop-${product.id}`}
+          style={{
+            '--orbit-angle': `${getOrbitAngle(index)}deg`,
+            '--orbit-duration': `${isFastTransition ? FAST_ORBIT_STEP_DURATION_MS : ORBIT_STEP_DURATION_MS}ms`,
+          } as CSSProperties}
+        >
+          {product.name.toLowerCase().replace(/\b[a-z]/g, character => character.toUpperCase())}
+        </p>)}
+        <div className={`hero-showcase-stage${loading ? ' is-loading' : ''}${isInteracting ? ' is-interacting' : ''}${quickViewReturning ? ' is-quick-view-returning' : ''}${pointerProductId ? ' is-product-pointer' : ''}`} aria-label="Selected product with neighboring pieces">
+          {loading ? <HeroLoadingIndicator /> : featuredProducts.map((product, index) => {
             const offset = (index - activeSlide + featuredProducts.length) % featuredProducts.length
             const position = offset === 0 ? 'active' : offset === 1 ? 'next' : 'previous'
             const className = `hero-showcase-item hero-showcase-item--${position}`
-            const orbitStep = 360 / featuredProducts.length
-            const angle = index * orbitStep - orbitRotation - dragDistance * orbitStep / 100
-            const normalizedAngle = ((angle % 360) + 360) % 360
-            const distanceFromCenter = Math.min(normalizedAngle, 360 - normalizedAngle)
-            const scale = 1 - .5 * Math.min(distanceFromCenter / orbitStep, 1)
-            const depthOrder = Math.round(10 + Math.cos(angle * Math.PI / 180) * 4)
+            const angle = getOrbitAngle(index)
+            const depth = (1 + Math.cos(angle * Math.PI / 180)) / 2
+            const scale = 1.5 + .5 * depth
             return <button
               className={`${className}${pointerProductId === product.id ? ' is-pointer-target' : ''}${quickViewClosing && quickViewProduct?.id === product.id ? ' is-return-source' : ''}`}
               key={product.id}
               type="button"
               data-product-id={product.id}
-              style={{ '--orbit-angle': `${angle}deg`, '--orbit-scale': scale, zIndex: depthOrder } as CSSProperties}
+              style={{ '--orbit-angle': `${angle}deg`, '--orbit-scale': scale, '--orbit-duration': `${isFastTransition ? FAST_ORBIT_STEP_DURATION_MS : ORBIT_STEP_DURATION_MS}ms` } as CSSProperties}
               aria-label={position === 'active' ? `Quick view: ${product.name}` : `Show ${product.name} in the center`}
               aria-haspopup={position === 'active' ? 'dialog' : undefined}
               tabIndex={0}
               onClick={event => {
                 if (ignoreProductClick.current) { ignoreProductClick.current = false; return }
-                if (event.detail !== 0 && event.target instanceof HTMLImageElement && !isVisibleProductPixel(event.target, event.clientX, event.clientY)) return
-                if (position === 'active') openQuickView(product, event.currentTarget)
-                else {
-                  const distance = (index - activeSlide + featuredProducts.length) % featuredProducts.length
-                  moveSlide(distance > featuredProducts.length / 2 ? distance - featuredProducts.length : distance)
-                }
+                const productButton = event.currentTarget
+                const pointerTarget = event.target instanceof Element
+                  ? event.target.closest<HTMLButtonElement>('.hero-showcase-item[data-product-id]')
+                  : null
+                const hitImage = event.detail !== 0
+                  ? getHeroProductImageAtPoint(event.clientX, event.clientY)
+                    ?? pointerTarget?.querySelector<HTMLImageElement>('.hero-showcase-image')
+                    ?? productButton.querySelector<HTMLImageElement>('.hero-showcase-image')
+                  : productButton.querySelector<HTMLImageElement>('.hero-showcase-image')
+                if (!hitImage) return
+                const hitButton = hitImage.closest<HTMLButtonElement>('.hero-showcase-item[data-product-id]') ?? productButton
+                const hitProductIndex = featuredProducts.findIndex(item => item.id === hitButton.dataset.productId)
+                if (hitProductIndex < 0) return
+                const hitProduct = featuredProducts[hitProductIndex]
+                resumeHeroAnimations()
+                if (hitProductIndex === activeSlide) openQuickView(hitProduct, hitButton)
+                else moveToProduct(hitProductIndex)
               }}
             >
               <span className={`hero-product-art hero-product-art--${product.slug}`}>
@@ -642,98 +962,124 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
             </button>
           })}
         </div>
-        <div className="hero-product-details" key={`details-${activeProduct.id}`}>
-          <h1><Link to={`/product/${activeProduct.slug || activeProduct.id}`}>{String(heroSettings.heading || activeProduct.name)}</Link></h1>
+        <div className="hero-product-details">
+          <h1><span className={`hero-product-title-track${heroTitleTransition ? ` is-${heroTitleTransition.direction}` : ''}`} key={heroTitleTransition?.id ?? activeProduct.id}>
+            {heroTitleTransition && <Link className="hero-product-title hero-product-title-outgoing" to={heroTitleTransition.outgoingHref}>{heroTitleTransition.outgoingTitle}</Link>}
+            <Link className={`hero-product-title${heroTitleTransition ? ' hero-product-title-incoming' : ''}`} to={`/product/${activeProduct.slug || activeProduct.id}`}>{String(heroSettings.heading || activeProduct.name)}</Link>
+          </span></h1>
           {Boolean(heroSettings.subtitle) && <p className="hero-cms-subtitle">{String(heroSettings.subtitle)}</p>}
           {Boolean(heroSettings.heading) && heroSettings.heading !== activeProduct.name && <Link className="hero-active-product-link" to={`/product/${activeProduct.slug || activeProduct.id}`}>{activeProduct.name}</Link>}
           <p className="hero-product-price">{formatTnd(activeProduct.price)}</p>
           {Boolean(heroSettings.buttonLabel) && <StoreDestinationLink className="hero-campaign-cta" to={String(heroSettings.destination ?? '/shop')}>{String(heroSettings.buttonLabel)} <ArrowRight size={12} /></StoreDestinationLink>}
         </div>
         {featuredProducts.length > 1 && <div className="hero-slider-controls" aria-label="Featured product slides">
-          <button type="button" aria-label="Previous product" onClick={() => moveSlide(-1)}><ArrowLeft size={16} strokeWidth={1.5} /></button>
-          <div className="hero-slider-progress" role="group" aria-label="Choose featured product">{featuredProducts.map((product, index) => <button key={product.id} type="button" className={index === activeSlide ? 'active' : ''} aria-label={`Show ${product.name}`} aria-current={index === activeSlide ? 'true' : undefined} onClick={() => { const forwardDistance = (index - activeSlide + featuredProducts.length) % featuredProducts.length; moveSlide(forwardDistance <= featuredProducts.length / 2 ? forwardDistance : forwardDistance - featuredProducts.length) }} />)}</div>
-          <button type="button" aria-label="Next product" onClick={() => moveSlide(1)}><ArrowRight size={16} strokeWidth={1.5} /></button>
+          <button type="button" aria-label="Previous product" onClick={() => moveSlide(-1, 'fast')}><ArrowLeft size={16} strokeWidth={1.5} /></button>
+          <div className="hero-slider-progress" role="group" aria-label="Choose featured product">{featuredProducts.map((product, index) => <button key={product.id} type="button" className={index === activeSlide ? 'active' : ''} aria-label={`Show ${product.name}`} aria-current={index === activeSlide ? 'true' : undefined} onClick={() => moveToProduct(index)} />)}</div>
+          <button type="button" aria-label="Next product" onClick={() => moveSlide(1, 'fast')}><ArrowRight size={16} strokeWidth={1.5} /></button>
         </div>}
         <span className="hero-index">{String(activeSlide + 1).padStart(2, '0')} / {String(featuredProducts.length).padStart(2, '0')}</span>
+      </> : loading ? <>
+        <HeroLoadingIndicator />
+        <span className="hero-index">01 / 01</span>
       </> : <span className="hero-index">01 / 01</span>}
     </section>
     {quickViewProduct && <div className={`hero-quick-view${quickViewClosing ? ' is-closing' : ''}`} role="dialog" aria-modal="true" aria-label={`Quick view: ${quickViewProduct.name}`} onMouseDown={event => { if (event.target === event.currentTarget) closeQuickView() }}>
-      <button className="hero-quick-view-close" type="button" aria-label="Close product details" onClick={closeQuickView}><X size={22} strokeWidth={1.5} /></button>
       <div className="hero-quick-view-inner">
         <div className="hero-quick-view-image"><img ref={quickViewImageRef} src={quickViewProduct.heroImage || quickViewProduct.image} alt={quickViewProduct.name} /></div>
+        <div className="hero-quick-view-toolbar">
+          {featuredProducts.length > 1 && <div className="hero-quick-view-pagination" aria-label="Quick view products">
+            <button type="button" aria-label="Previous product" onClick={() => navigateQuickView(-1)}><ArrowLeft size={14} strokeWidth={1.7} /></button>
+            <span aria-live="polite">{String(featuredProducts.findIndex(product => product.id === quickViewProduct.id) + 1).padStart(2, '0')} / {String(featuredProducts.length).padStart(2, '0')}</span>
+            <button type="button" aria-label="Next product" onClick={() => navigateQuickView(1)}><ArrowRight size={14} strokeWidth={1.7} /></button>
+          </div>}
+          <button className="hero-quick-view-close" type="button" aria-label="Close product details" onClick={closeQuickView}><X size={22} strokeWidth={1.5} /></button>
+        </div>
         <div className="hero-quick-view-info">
-          <p className="eyebrow">{quickViewProduct.category}{quickViewProduct.color ? ` / ${quickViewProduct.color}` : ''}</p>
-          <h2>{quickViewProduct.name}</h2>
-          <p className="hero-quick-view-price">{formatTnd(quickViewVariant?.price ?? quickViewProduct.price)}</p>
-          <p className="hero-quick-view-description">A considered silhouette with a relaxed fit, crafted for everyday movement. Finished with signature OFF detailing.</p>
-          <div className="variant-block hero-quick-view-variants">
-            <div className="variant-title"><span>Color</span><span>{quickViewColor}</span></div>
-            <div className="swatches">{quickViewColors.map(color => <button key={color} type="button" aria-label={`Select color ${color}`} className={`swatch ${quickViewColor === color ? 'active' : ''}`} style={{ background: colorStyle(color) }} onClick={() => { setQuickViewColor(color); setQuickViewSize(''); setQuickViewQuantity(1); setQuickViewMessage('') }} />)}</div>
+          <div className="hero-quick-view-product-details">
+            <p className="eyebrow">{quickViewProduct.category}{quickViewProduct.color ? ` / ${quickViewProduct.color}` : ''}</p>
+            <h2>{quickViewProduct.name}</h2>
+            <p className="hero-quick-view-price">{formatTnd(quickViewVariant?.price ?? quickViewProduct.price)}</p>
+            <p className="hero-quick-view-description">A considered silhouette with a relaxed fit, crafted for everyday movement. Finished with signature OFF detailing.</p>
+            <div className="variant-block hero-quick-view-variants">
+              <div className="variant-title"><span>Color</span><span>{quickViewColor}</span></div>
+              <div className="swatches">{quickViewColors.map(color => <button key={color} type="button" aria-label={`Select color ${color}`} className={`swatch ${quickViewColor === color ? 'active' : ''}`} style={{ background: colorStyle(color) }} onClick={() => { setQuickViewColor(color); setQuickViewSize(''); setQuickViewQuantity(1); setQuickViewMessage('') }} />)}</div>
+            </div>
+            <div className="variant-block hero-quick-view-variants">
+              <div className="variant-title"><span>Select size</span></div>
+              <div className="size-options">{['XS', 'S', 'M', 'L', 'XL'].map(size => {
+                const variant = quickViewProduct.variants.find(item => item.active && item.color === quickViewColor && item.size === size)
+                return <button key={size} type="button" disabled={!variant || variant.stock < 1} className={quickViewSize === size ? 'active' : ''} onClick={() => { setQuickViewSize(size); setQuickViewQuantity(1); setQuickViewMessage('') }}>{size}</button>
+              })}</div>
+            </div>
+            <div className="hero-quick-view-quantity-row"><span>Quantity</span><div className="quantity-control"><button type="button" aria-label="Decrease quantity" disabled={quickViewQuantity <= 1} onClick={() => setQuickViewQuantity(quantity => Math.max(1, quantity - 1))}><Minus size={12} /></button><span>{quickViewQuantity}</span><button type="button" aria-label="Increase quantity" disabled={!quickViewVariant || quickViewQuantity >= quickViewVariant.stock} onClick={() => setQuickViewQuantity(quantity => Math.min(quickViewVariant?.stock ?? quantity, quantity + 1))}><Plus size={12} /></button></div></div>
           </div>
-          <div className="variant-block hero-quick-view-variants">
-            <div className="variant-title"><span>Select size</span></div>
-            <div className="size-options">{['XS', 'S', 'M', 'L', 'XL'].map(size => {
-              const variant = quickViewProduct.variants.find(item => item.active && item.color === quickViewColor && item.size === size)
-              return <button key={size} type="button" disabled={!variant || variant.stock < 1} className={quickViewSize === size ? 'active' : ''} onClick={() => { setQuickViewSize(size); setQuickViewQuantity(1); setQuickViewMessage('') }}>{size}</button>
-            })}</div>
+          <div className="hero-quick-view-actions">
+            <button className="button button-dark add-button" type="button" onClick={() => {
+              if (!quickViewVariant) { setQuickViewMessage('Please select an available size before adding to your bag.'); return }
+              setQuickViewMessage(addToBag(quickViewProduct.id, quickViewSize, quickViewColor, quickViewVariant.sku, quickViewQuantity) ? 'Added to your bag.' : 'There is not enough stock available.')
+            }}>ADD TO BAG <Plus size={15} /></button>
+            {quickViewMessage && <p className="form-message" role="status">{quickViewMessage}</p>}
+            <Link className="button button-dark" to={`/product/${quickViewProduct.slug || quickViewProduct.id}`} onClick={() => setQuickViewProduct(null)}>VIEW FULL DETAILS <ArrowRight size={14} /></Link>
           </div>
-          <div className="hero-quick-view-quantity-row"><span>Quantity</span><div className="quantity-control"><button type="button" aria-label="Decrease quantity" disabled={quickViewQuantity <= 1} onClick={() => setQuickViewQuantity(quantity => Math.max(1, quantity - 1))}><Minus size={12} /></button><span>{quickViewQuantity}</span><button type="button" aria-label="Increase quantity" disabled={!quickViewVariant || quickViewQuantity >= quickViewVariant.stock} onClick={() => setQuickViewQuantity(quantity => Math.min(quickViewVariant?.stock ?? quantity, quantity + 1))}><Plus size={12} /></button></div></div>
-          <button className="button button-dark add-button" type="button" onClick={() => {
-            if (!quickViewVariant) { setQuickViewMessage('Please select an available size before adding to your bag.'); return }
-            setQuickViewMessage(addToBag(quickViewProduct.id, quickViewSize, quickViewColor, quickViewVariant.sku, quickViewQuantity) ? 'Added to your bag.' : 'There is not enough stock available.')
-          }}>ADD TO BAG <Plus size={15} /></button>
-          {quickViewMessage && <p className="form-message" role="status">{quickViewMessage}</p>}
-          <Link className="button button-dark" to={`/product/${quickViewProduct.slug || quickViewProduct.id}`} onClick={() => setQuickViewProduct(null)}>VIEW FULL DETAILS <ArrowRight size={14} /></Link>
         </div>
       </div>
     </div>}
-    {homeSections.length ? homeSections.filter(section => section.enabled && section.type !== 'hero').sort((a, b) => a.order - b.order).map(section => {
+    {homeSections.length ? <>{homeSections.filter(section => section.enabled && section.type !== 'hero').sort((a, b) => a.order - b.order).map(section => {
       const settings = section.settings
-      if (section.type === 'new-arrivals' || section.type === 'featured-products') {
-        const items = section.type === 'new-arrivals' ? arrivalsProducts : curatedProducts
+      if (section.type === 'featured-products') {
         const heading = String(settings.heading ?? section.title)
         const subtitle = String(settings.subtitle ?? '')
         const destination = String(settings.destination ?? '/shop')
-        return <section className={`section arrivals cms-${section.type}`} key={section.id}><div className="section-heading"><div>{subtitle && <p className="eyebrow">{subtitle}</p>}<h2>{heading}</h2></div>{settings.showViewAll !== false && <StoreDestinationLink to={destination} className="text-link">{String(settings.buttonLabel || 'Shop all')} <ArrowRight size={14} /></StoreDestinationLink>}</div>{loading ? <p className="catalog-message">Loading the collection…</p> : error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : items.length ? <div className="product-grid home-grid">{items.slice(0, Number(settings.limit ?? 3)).map(product => <ProductCard key={product.id} product={product} showPrice={settings.showPrices !== false} />)}</div> : <p className="catalog-message">No products are available yet.</p>}</section>
+        const viewAllLabel = String(settings.buttonLabel || 'Explore all')
+        return <section className="section arrivals cms-featured-products selection-section" key={section.id}><div className="section-heading"><div>{subtitle && <p className="eyebrow">{subtitle}</p>}<h2>{heading}</h2></div>{settings.showViewAll !== false && <StoreDestinationLink to={destination} className="text-link section-explore-link">{viewAllLabel.toLowerCase() === 'shop all' ? 'Explore all' : viewAllLabel} <ArrowUpRight size={14} /></StoreDestinationLink>}</div>{error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : <HomeSelectionCards cards={getSelectionCards(settings, products, collections)} products={products} collections={collections} imageLoading={loading} />}</section>
+      }
+      if (section.type === 'new-arrivals') {
+        const items = arrivalsProducts
+        const heading = String(settings.heading ?? section.title)
+        const subtitle = String(settings.subtitle ?? '')
+        const destination = String(settings.destination ?? '/shop')
+        const viewAllLabel = String(settings.buttonLabel || 'Explore all')
+        return <section className={`section arrivals cms-${section.type}`} key={section.id}><div className="section-heading"><div>{subtitle && <p className="eyebrow">{subtitle}</p>}<h2>{heading}</h2></div>{settings.showViewAll !== false && <StoreDestinationLink to={destination} className="text-link section-explore-link">{viewAllLabel.toLowerCase() === 'shop all' ? 'Explore all' : viewAllLabel} <ArrowUpRight size={14} /></StoreDestinationLink>}</div>{loading ? <div className="product-grid home-grid product-loading-grid">{Array.from({ length: Math.min(3, Number(settings.limit ?? 3)) }, (_, index) => <ProductLoadingCard key={index} />)}</div> : error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : items.length ? <div className="product-grid home-grid">{items.slice(0, Number(settings.limit ?? 3)).map(product => <ProductCard key={product.id} product={product} showPrice={settings.showPrices !== false} />)}</div> : <p className="catalog-message">No products are available yet.</p>}</section>
       }
       if (section.type === 'editorial' || section.type === 'brand') {
-        // Retain the original OFF / STUDIO split image-and-copy layout for older CMS rows.
-        const image = String(settings.image || (section.id === 'editorial' ? photo('photo-1529139574466-a303027c1d8b', 1300) : ''))
         const destination = String(settings.destination ?? '/shop')
-        return <section className="category-feature cms-editorial" key={section.id}><div className="category-image"><picture>{Boolean(settings.mobileImage) && <source media="(max-width: 700px)" srcSet={imageUrl(settings.mobileImage)} />}<img src={imageUrl(image)} alt={String(settings.imageAlt ?? 'OFF ready-to-wear collection')} loading="lazy" /></picture></div><div className="category-copy"><p className="eyebrow">{String(settings.eyebrow || (section.id === 'editorial' ? 'DRESS WITH INTENTION' : 'OFF / STUDIO'))}</p><h2>{String(settings.heading ?? section.title)}</h2><p>{String(settings.description ?? '')}</p>{Boolean(settings.buttonLabel) && <StoreDestinationLink className="text-link" to={destination}>{String(settings.buttonLabel)} <ArrowRight size={14} /></StoreDestinationLink>}</div></section>
+        return <section className="category-feature cms-editorial" key={section.id}><div className="category-image category-image-symbol"><img src="/off-studio-symbol.png" alt="OFF Studio symbol" loading="lazy" /></div><div className="category-copy"><p className="eyebrow">{String(settings.eyebrow || (section.id === 'editorial' ? 'DRESS WITH INTENTION' : 'OFF / STUDIO'))}</p><h2>{String(settings.heading ?? section.title)}</h2><p>{String(settings.description ?? '')}</p>{Boolean(settings.buttonLabel) && <StoreDestinationLink className="text-link" to={destination}>{String(settings.buttonLabel)} <ArrowRight size={14} /></StoreDestinationLink>}</div></section>
       }
       if (section.type === 'categories') return <section className="category-tiles" key={section.id}>{categories.map(category => { const card = Array.isArray(settings.categoryItems) ? (settings.categoryItems as { categoryId: string; title?: string; description?: string; image?: string; destination?: string }[]).find(item => item.categoryId === category.id) : undefined; return <StoreDestinationLink to={String(card?.destination || `/shop?category=${encodeURIComponent(category.name)}`)} className="category-tile" key={category.slug}><img src={card?.image ? imageUrl(card.image) : category.image || photo('photo-1503342217505-b0a15ec3261c', 700)} alt="" loading="lazy" /><span className="tile-label"><b>{card?.title || category.name}</b><small>{card?.description || `${category.productCount} pieces`}</small></span><ArrowRight size={17} /></StoreDestinationLink> })}</section>
       if (section.type === 'collection' || section.type === 'featured-release') { const collection = collections.find(item => item._id === settings.collectionId); const campaignImage = String(settings.image || collection?.image || ''); const destination = String(settings.destination || (collection ? `/collections/${collection.slug}` : '/collections')); return <section className="campaign" key={section.id}>{campaignImage && <img src={imageUrl(campaignImage)} alt="" loading="lazy" />}<div className="campaign-overlay"><p className="eyebrow">{String(settings.subtitle ?? '')}</p><h2>{String(settings.heading || collection?.name || section.title)}</h2>{Boolean(settings.description) && <p>{String(settings.description)}</p>}{Boolean(settings.buttonLabel) && <StoreDestinationLink className="button button-light" to={destination}>{String(settings.buttonLabel)} <ArrowRight size={14} /></StoreDestinationLink>}</div></section> }
-      if (section.type === 'newsletter') return <section className="section cms-newsletter" key={section.id}><p className="eyebrow">OFF / NOTES</p><h2>{String(settings.heading ?? 'Join the OFF list')}</h2><p>{String(settings.description ?? '')}</p></section>
+      if (section.type === 'newsletter') return <Fragment key={section.id}><NewsletterSignupSection heading={String(settings.heading ?? 'Join the OFF list')} description={String(settings.description || 'Notes from the studio and new arrivals.')}/>{!homeSections.some(item => item.enabled && item.type === 'instagram-feed') && <InstagramFeedSection />}</Fragment>
+      if (section.type === 'instagram-feed') return <InstagramFeedSection key={section.id} settings={settings} />
       if (section.type === 'footer-announcement') return <section className="section cms-footer-announcement" key={section.id}><p>{String(settings.heading ?? settings.description ?? section.title)}</p></section>
       if (section.type === 'rich-text') return <section className="section cms-rich-text" key={section.id}><p className="eyebrow">{String(settings.eyebrow ?? '')}</p><h2>{String(settings.heading ?? section.title)}</h2><p>{String(settings.description ?? '')}</p></section>
       return null
-    }) : <>
-      <section className="section arrivals"><div className="section-heading"><p className="eyebrow">THE LATEST EDIT</p><h2>New arrivals</h2><Link to="/shop" className="text-link">Shop all <ArrowRight size={14} /></Link></div>{loading ? <p className="catalog-message">Loading the collection…</p> : error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : products.length ? <div className="product-grid home-grid">{products.slice(0, 3).map(product => <ProductCard key={product.id} product={product} />)}</div> : <p className="catalog-message">No products are available yet.</p>}</section>
+    })}{!homeSections.some(section => section.enabled && (section.type === 'newsletter' || section.type === 'instagram-feed')) && <InstagramFeedSection />}</> : <>
+      <section className="section arrivals"><div className="section-heading"><h2>New arrivals</h2><Link to="/shop" className="text-link section-explore-link">Explore all <ArrowUpRight size={14} /></Link></div>{loading ? <div className="product-grid home-grid product-loading-grid">{Array.from({ length: 3 }, (_, index) => <ProductLoadingCard key={index} />)}</div> : error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : products.length ? <div className="product-grid home-grid">{products.slice(0, 3).map(product => <ProductCard key={product.id} product={product} />)}</div> : <p className="catalog-message">No products are available yet.</p>}</section>
       <section className="category-feature"><div className="category-image"><img src={photo('photo-1529139574466-a303027c1d8b', 1300)} alt="OFF ready-to-wear collection" /></div><div className="category-copy"><p className="eyebrow">DRESS WITH INTENTION</p><h2>Uniform<br />for the<br />unordinary.</h2><p>Essential forms. Unexpected details. A wardrobe designed to move with you.</p><Link className="text-link" to="/shop">Explore ready-to-wear <ArrowRight size={14} /></Link></div></section>
       <section className="category-tiles">{[['MEN', 'Shop the collection', 'photo-1503342217505-b0a15ec3261c'], ['WOMEN', 'Discover the edit', 'photo-1515886657613-9f3515b0c78f'], ['ACCESSORIES', 'Complete the look', 'photo-1521369909029-2afed882baee']].map(([title, sub, image]) => <Link to="/shop" className="category-tile" key={title}><img src={photo(image, 700)} alt="" loading="lazy" /><span className="tile-label"><b>{title}</b><small>{sub}</small></span><ArrowRight size={17} /></Link>)}</section>
       <section className="campaign"><img src={photo('photo-1523398002811-999ca8dec234', 1800)} alt="OFF campaign, made for the everyday" loading="lazy" /><div className="campaign-overlay"><p className="eyebrow">{content.campaignEyebrow}</p><h2>{content.campaignTitle}</h2><Link className="button button-light" to="/shop">DISCOVER OFF <ArrowRight size={14} /></Link></div></section>
+      <InstagramFeedSection />
     </>}
-  </main><Footer newsletterEnabled={homeSections.length === 0 || homeSections.some(section => section.type === 'newsletter' && section.enabled)} announcement={String(homeSections.find(section => section.type === 'footer-announcement' && section.enabled)?.settings.heading ?? '')} /></>
+  </main><Footer announcement={String(homeSections.find(section => section.type === 'footer-announcement' && section.enabled)?.settings.heading ?? '')} /></>
 }
 
 function Shop() {
-  const { products, categories, collections, loading, error, reload } = useCatalog()
+  const { products, categories, collections, homeSections, loading, error, reload } = useCatalog()
   const [params, setParams] = useSearchParams()
   const [filterOpen, setFilterOpen] = useState(false)
   const category = params.get('category') ?? ''
   const query = params.get('q')?.toLowerCase() ?? ''
   const sort = params.get('sort') ?? 'featured'
   const selectedSize = params.get('size') ?? ''
-  const selectedColor = params.get('color') ?? ''
-  const selectedCollection = params.get('collection') ?? ''
-  const collection = collections.find(item => item.slug === selectedCollection)
+  const selectedColors = params.getAll('color')
+  const selectedCollections = params.getAll('collection')
+  const collection = selectedCollections.length === 1 ? collections.find(item => item.slug === selectedCollections[0]) : undefined
   const requestedPrice = Number(params.get('price') ?? '5000')
   const maxPrice = Number.isFinite(requestedPrice) ? Math.min(5000, Math.max(0, requestedPrice)) : 5000
   const page = Math.max(1, Number(params.get('page') ?? '1'))
   const filterKey = params.toString()
   const [filtered, setFiltered] = useState<Product[]>([])
   const [filteredCount, setFilteredCount] = useState(0)
+  const totalPages = Math.max(1, Math.ceil(filteredCount / 6))
   const [listingLoading, setListingLoading] = useState(true)
   const [listingError, setListingError] = useState('')
   useEffect(() => {
@@ -764,25 +1110,68 @@ function Shop() {
   }, [filterKey, page, maxPrice])
   const updateFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params)
+    next.delete(key)
     value ? next.set(key, value) : next.delete(key)
     if (key !== 'page') next.delete('page')
     setParams(next)
   }
-  const colorChoices = Array.from(new Set(products.flatMap(product => product.variants.filter((variant) => variant.active && variant.stock > 0).map((variant) => variant.color))))
+  const toggleMultiFilter = (key: 'collection' | 'color', value: string) => {
+    const next = new URLSearchParams(params)
+    const selected = next.getAll(key)
+    next.delete(key)
+    for (const item of selected) if (item !== value) next.append(key, item)
+    if (!selected.includes(value)) next.append(key, value)
+    next.delete('page')
+    setParams(next)
+  }
+  const colorChoices = Array.from(new Set(products.flatMap(product => product.variants.filter(variant => variant.active).map(variant => variant.color.trim()).filter(Boolean)))).sort((a, b) => a.localeCompare(b))
+  const selectionSection = homeSections.find(section => section.enabled && section.type === 'featured-products')
+  const selectionCards = getSelectionCards(selectionSection?.settings ?? {}, products, collections)
+  const linkedCollectionOptions = selectionCards.flatMap(card => {
+    const item = collections.find(collection => collection._id === card.collectionId)
+    return item ? [{ card, collection: item }] : []
+  }).filter((entry, index, entries) => entries.findIndex(candidate => candidate.collection._id === entry.collection._id) === index)
+  const collectionOptions = linkedCollectionOptions.length
+    ? linkedCollectionOptions
+    : collections.map(item => ({ card: { title: item.name }, collection: item }))
   const clearFilters = () => { setParams(query ? { q: query } : {}) }
+  const activeFilterCount = [selectedSize, ...selectedColors, ...selectedCollections].filter(Boolean).length
+  const filterOptions = <div className="shop-filter-options">
+    <div className="filter-group"><h3>Collection</h3><div className="size-chips shop-filter-chips" role="group" aria-label="Filter by collection">{collectionOptions.map(({ card, collection: item }) => <button type="button" key={item._id} className={selectedCollections.includes(item.slug) ? 'selected' : ''} aria-pressed={selectedCollections.includes(item.slug)} onClick={() => toggleMultiFilter('collection', item.slug)}>{card.title}</button>)}</div></div>
+    <div className="filter-group"><h3>Size</h3><div className="size-chips">{['XS', 'S', 'M', 'L', 'XL'].map(size => <button type="button" key={size} className={selectedSize === size ? 'selected' : ''} aria-pressed={selectedSize === size} onClick={() => updateFilter('size', selectedSize === size ? '' : size)}>{size}</button>)}</div></div>
+    <div className="filter-group"><h3>Product color</h3><div className="size-chips shop-filter-chips" role="group" aria-label="Filter by product color">{colorChoices.map(color => <button type="button" key={color} className={selectedColors.includes(color) ? 'selected' : ''} aria-pressed={selectedColors.includes(color)} onClick={() => toggleMultiFilter('color', color)}>{color}</button>)}</div></div>
+    <button className="clear-filter" type="button" onClick={clearFilters}>Clear all filters</button>
+  </div>
+  const sidebarFilters = <>
+    <h3>Categories</h3>
+    <button className={!category ? 'selected' : ''} type="button" onClick={() => updateFilter('category', '')}>All pieces <span>{products.length}</span></button>
+    {categories.map(item => <button key={item.slug} type="button" className={category === item.name ? 'selected' : ''} onClick={() => updateFilter('category', item.name)}>{item.name}<span>{item.productCount || '—'}</span></button>)}
+    <div className="filter-group"><h3>Price — up to {formatTnd(maxPrice)}</h3><input type="range" min="0" max="5000" step="50" value={maxPrice} onChange={event => updateFilter('price', event.target.value === '5000' ? '' : event.target.value)} /><div className="price-range"><span>{formatTnd(0)}</span><span>{formatTnd(5000)}+</span></div></div>
+    <button className="clear-filter" type="button" onClick={clearFilters}>Clear all filters</button>
+  </>
   return <><main className="shop-page page-shell">
     <div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><span>Shop</span></div>
-    <div className="collection-title"><div><p className="eyebrow">{collection ? 'CURATED COLLECTION' : 'THE OFF COLLECTION'}</p><h1>{collection?.name || category || 'Ready-to-Wear'}</h1>{collection?.description && <p>{collection.description}</p>}</div><span>{filteredCount} pieces</span></div>
-    <div className="shop-toolbar"><button className="filter-trigger" onClick={() => setFilterOpen(true)}>FILTER + REFINE <span>{[category, selectedSize, selectedColor, maxPrice < 5000 ? 'price' : ''].filter(Boolean).length}</span></button><label>Sort by <select value={sort} onChange={event => updateFilter('sort', event.target.value === 'featured' ? '' : event.target.value)}><option value="featured">Featured</option><option value="manual">Manual Order</option><option value="newest">Newest</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></select></label></div>
-    <div className="shop-layout"><aside className="filter-sidebar"><h3>Categories</h3><button className={!category ? 'selected' : ''} onClick={() => updateFilter('category', '')}>All pieces <span>{products.length}</span></button>{categories.map(item => <button key={item.slug} className={category === item.name ? 'selected' : ''} onClick={() => updateFilter('category', item.name)}>{item.name}<span>{item.productCount || '—'}</span></button>)}<div className="filter-group"><h3>Size</h3><div className="size-chips">{['XS', 'S', 'M', 'L', 'XL'].map(size => <button key={size} className={selectedSize === size ? 'selected' : ''} onClick={() => updateFilter('size', selectedSize === size ? '' : size)}>{size}</button>)}</div></div><div className="filter-group"><h3>Color</h3><select className="color-filter" aria-label="Filter by color" value={selectedColor} onChange={event => updateFilter('color', event.target.value)}><option value="">All colors</option>{colorChoices.map(color => <option key={color}>{color}</option>)}</select></div><div className="filter-group"><h3>Price — up to {formatTnd(maxPrice)}</h3><input type="range" min="0" max="5000" step="50" value={maxPrice} onChange={event => updateFilter('price', event.target.value === '5000' ? '' : event.target.value)} /><div className="price-range"><span>{formatTnd(0)}</span><span>{formatTnd(5000)}+</span></div></div><button className="clear-filter" onClick={clearFilters}>Clear all filters</button></aside>
-      <div className="listing-area">{loading || listingLoading ? <p className="catalog-message">Loading the collection…</p> : error || listingError ? <div className="catalog-message"><p>{error || listingError}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : <>{(query || category || selectedSize || selectedColor || maxPrice < 5000) && <div className="selected-filters">{query && <span>Search: “{query}”</span>}{category && <span>{category}</span>}{selectedSize && <span>Size {selectedSize}</span>}{selectedColor && <span>{selectedColor}</span>}{maxPrice < 5000 && <span>Up to {formatTnd(maxPrice)}</span>}<button className="text-link" onClick={clearFilters}>Clear all</button></div>}{filtered.length ? <div className="product-grid listing-grid">{filtered.map(product => <ProductCard key={product.id} product={product} />)}</div> : <div className="empty-state"><p className="eyebrow">NOTHING FOUND</p><h2>No pieces match your search.</h2><button className="text-link" onClick={clearFilters}>Clear filters <ArrowRight size={14} /></button></div>}<div className="pagination"><button aria-label="Previous page" disabled={page === 1} onClick={() => updateFilter('page', String(page - 1))}><ArrowLeft size={14} /></button><span>0{page} <i>/</i> 0{Math.max(1, Math.ceil(filteredCount / 6))}</span><button aria-label="Next page" disabled={page >= Math.ceil(filteredCount / 6)} onClick={() => updateFilter('page', String(page + 1))}><ArrowRight size={14} /></button></div></>}</div>
+    <div className="collection-title"><div className="collection-title-main"><div className="collection-title-line"><h1>{collection?.name || (selectedCollections.length > 1 ? 'Selected collections' : category || 'Ready-to-Wear')}</h1><span className="collection-count" aria-label={`${filteredCount} products`}>{filteredCount}</span></div>{collection?.description && <p>{collection.description}</p>}</div><div className="shop-toolbar-actions"><label>Sort by <select value={sort} onChange={event => updateFilter('sort', event.target.value === 'featured' ? '' : event.target.value)}><option value="featured">Featured</option><option value="manual">Manual Order</option><option value="newest">Newest</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></select></label><button className="filter-trigger" onClick={() => setFilterOpen(true)}>FILTER<span>{activeFilterCount + (category ? 1 : 0)}</span></button></div></div>
+    <div className="shop-layout"><aside className="filter-sidebar">{sidebarFilters}</aside>
+      <div className="listing-area">{loading || listingLoading ? <p className="catalog-message">Loading the collection…</p> : error || listingError ? <div className="catalog-message"><p>{error || listingError}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : <>{(query || category || selectedSize || selectedColors.length > 0 || selectedCollections.length > 0 || maxPrice < 5000) && <div className="selected-filters">{query && <span>Search: “{query}”</span>}{category && <span>{category}</span>}{selectedCollections.map(slug => <span key={`collection-${slug}`}>{collections.find(item => item.slug === slug)?.name ?? slug}</span>)}{selectedSize && <span>Size {selectedSize}</span>}{selectedColors.map(color => <span key={`color-${color}`}>{color}</span>)}{maxPrice < 5000 && <span>Up to {formatTnd(maxPrice)}</span>}<button className="text-link" onClick={clearFilters}>Clear all</button></div>}{filtered.length ? <div className="product-grid listing-grid">{filtered.map(product => <ProductCard key={product.id} product={product} />)}</div> : <div className="empty-state"><p className="eyebrow">NOTHING FOUND</p><h2>No pieces match your search.</h2><button className="text-link" onClick={clearFilters}>Clear filters <ArrowRight size={14} /></button></div>}<div className="pagination shop-pagination" role="group" aria-label="Product pages"><button type="button" aria-label="Previous page" disabled={page === 1} onClick={() => updateFilter('page', String(page - 1))}><ArrowLeft size={16} strokeWidth={1.5} /></button><div className="hero-slider-progress">{Array.from({ length: totalPages }, (_, index) => <button type="button" key={index} className={index + 1 === page ? 'active' : ''} aria-label={`Go to page ${index + 1}`} aria-current={index + 1 === page ? 'page' : undefined} onClick={() => updateFilter('page', String(index + 1))} />)}</div><button type="button" aria-label="Next page" disabled={page >= totalPages} onClick={() => updateFilter('page', String(page + 1))}><ArrowRight size={16} strokeWidth={1.5} /></button></div></>}</div>
     </div>
-  </main><Footer />{filterOpen && <div className="drawer-backdrop" onClick={() => setFilterOpen(false)}><div className="filter-drawer" onClick={e => e.stopPropagation()}><button className="drawer-close" onClick={() => setFilterOpen(false)} aria-label="Close filters"><X size={18} /></button><p className="eyebrow">REFINE YOUR EDIT</p><h2>Filters</h2>{categories.map(item => <button key={item.slug} className="filter-drawer-option" onClick={() => { updateFilter('category', item.name); setFilterOpen(false) }}>{item.name}<ArrowRight size={14} /></button>)}<div className="filter-group"><h3>Size</h3><div className="size-chips">{['XS', 'S', 'M', 'L', 'XL'].map(size => <button key={size} className={selectedSize === size ? 'selected' : ''} onClick={() => updateFilter('size', selectedSize === size ? '' : size)}>{size}</button>)}</div></div><button className="button button-dark" onClick={() => setFilterOpen(false)}>VIEW {filtered.length} PIECES</button></div></div>}</>
+  </main><Footer />{filterOpen && <div className="drawer-backdrop" onClick={() => setFilterOpen(false)}><div className="filter-drawer" onClick={e => e.stopPropagation()}><button className="drawer-close" onClick={() => setFilterOpen(false)} aria-label="Close filters"><X size={18} /></button><p className="eyebrow">REFINE YOUR EDIT</p><h2>Filters</h2>{filterOptions}<button className="button button-dark" onClick={() => setFilterOpen(false)}>VIEW {filteredCount} PIECES</button></div></div>}</>
 }
 
 function CollectionsPage() {
-  const { collections, loading, error, reload } = useCatalog()
-  return <><main className="page-shell shop-page"><div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><span>Collections</span></div><div className="collection-title"><div><p className="eyebrow">THE OFF EDIT</p><h1>Collections</h1></div><span>{collections.length} edits</span></div>{loading ? <p className="catalog-message">Loading collections…</p> : error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : collections.length ? <div className="product-grid home-grid">{collections.map(collection => <Link className="product-card" key={collection._id} to={`/shop?collection=${encodeURIComponent(collection.slug)}`}><div className="product-image-wrap"><img src={collection.image || photo('photo-1529139574466-a303027c1d8b')} alt={collection.name} loading="lazy" /></div><div className="product-meta"><span>{collection.name}</span><small>{collection.productCount ?? 0} pieces · {collection.description}</small></div></Link>)}</div> : <div className="empty-state"><p className="eyebrow">COMING SOON</p><h2>Curated edits are on their way.</h2><Link className="text-link" to="/shop">Shop all pieces <ArrowRight size={14} /></Link></div>}</main><Footer /></>
+  const { products, collections, homeSections, loading, error, reload } = useCatalog()
+  const selectionSection = homeSections.find(section => section.enabled && section.type === 'featured-products')
+  const selectionCards = getSelectionCards(selectionSection?.settings ?? {}, products, collections)
+  return <><main className="page-shell shop-page"><div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><span>Collections</span></div><div className="collection-title"><div><p className="eyebrow">THE OFF EDIT</p><h1>Collections</h1></div><span>{selectionCards.length} edits</span></div>{loading ? <p className="catalog-message">Loading collections…</p> : error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : selectionCards.length ? <div className="collections-edition-list">{selectionCards.map((card, index) => {
+    const collection = collections.find(item => item._id === card.collectionId)
+    const relatedProducts = (collection?.productIds ?? []).slice(0, 4)
+      .map(id => products.find(product => product.id === id))
+      .filter((product): product is Product => Boolean(product))
+    return <section className="collection-edition-row" key={`${card.title}-${collection?._id ?? index}`}>
+      <div className="collection-edition-feature"><HomeSelectionCards cards={[card]} products={products} collections={collections} /></div>
+      <div className="collection-edition-products">{relatedProducts.map(product => <ProductCard key={product.id} product={product} />)}</div>
+    </section>
+  })}</div> : <div className="empty-state"><p className="eyebrow">COMING SOON</p><h2>Curated edits are on their way.</h2><Link className="text-link" to="/shop">Shop all pieces <ArrowRight size={14} /></Link></div>}</main><Footer /></>
 }
 
 function ProductPage({ addToBag }: { addToBag: (id: string, size: string, color: string, sku: string) => boolean }) {
@@ -1077,7 +1466,7 @@ function CheckoutSuccess({ clearBag }: { clearBag: () => void }) {
 type PublishedPageData = { name: string; slug: string; publishedSections: CatalogState['homeSections'] }
 
 function PublishedPageSections({ sections }: { sections: CatalogState['homeSections'] }) {
-  const { products, categories } = useCatalog()
+  const { products, categories, collections } = useCatalog()
   return <>{sections.filter(section => section.enabled).sort((a,b) => a.order-b.order).map(section => {
     const settings = section.settings
     const image = typeof settings.image === 'string' ? publicMediaUrl(settings.image) : ''
@@ -1085,7 +1474,8 @@ function PublishedPageSections({ sections }: { sections: CatalogState['homeSecti
     const description = String(settings.description ?? settings.subtitle ?? '')
     if (section.type === 'hero' || section.type === 'editorial' || section.type === 'brand' || section.type === 'rich-text') return <section className="about-cms-section" key={section.id}>{Boolean(image) && <img src={image} alt={String(settings.imageAlt ?? '')} />}{Boolean(settings.eyebrow) && <p className="eyebrow">{String(settings.eyebrow)}</p>}<h1>{heading}</h1>{Boolean(description) && <p>{description}</p>}{Boolean(settings.buttonLabel) && <StoreDestinationLink className="text-link" to={String(settings.destination ?? '/shop')}>{String(settings.buttonLabel)} <ArrowRight size={14} /></StoreDestinationLink>}</section>
     if (section.type === 'categories') return <section className="category-tiles" key={section.id}>{categories.map(category => <Link to={`/shop?category=${encodeURIComponent(category.name)}`} className="category-tile" key={category.slug}><img src={category.image} alt="" /><span className="tile-label"><b>{category.name}</b><small>{category.productCount} pieces</small></span></Link>)}</section>
-    if (section.type === 'new-arrivals' || section.type === 'featured-products') { const ids = Array.isArray(settings.productIds) ? settings.productIds as string[] : []; const list = settings.mode === 'manual' ? ids.map(id => products.find(product => product.id === id)).filter((item): item is Product => Boolean(item)) : products.slice(0, Number(settings.limit ?? 3)); return <section className="section arrivals" key={section.id}><div className="section-heading"><h2>{heading}</h2></div><div className="product-grid home-grid">{list.slice(0, Number(settings.limit ?? 3)).map(product => <ProductCard key={product.id} product={product} showPrice={settings.showPrices !== false} />)}</div></section> }
+    if (section.type === 'featured-products') return <section className="section selection-section" key={section.id}><div className="section-heading"><h2>{heading}</h2></div><HomeSelectionCards cards={getSelectionCards(settings, products, collections)} products={products} collections={collections} /></section>
+    if (section.type === 'new-arrivals') { const ids = Array.isArray(settings.productIds) ? settings.productIds as string[] : []; const list = settings.mode === 'manual' ? ids.map(id => products.find(product => product.id === id)).filter((item): item is Product => Boolean(item)) : products.slice(0, Number(settings.limit ?? 3)); return <section className="section arrivals" key={section.id}><div className="section-heading"><h2>{heading}</h2></div><div className="product-grid home-grid">{list.slice(0, Number(settings.limit ?? 3)).map(product => <ProductCard key={product.id} product={product} showPrice={settings.showPrices !== false} />)}</div></section> }
     if (section.type === 'collection' && image) return <section className="campaign" key={section.id}><img src={image} alt="" /><div className="campaign-overlay"><p className="eyebrow">{String(settings.subtitle ?? '')}</p><h2>{heading}</h2>{Boolean(settings.buttonLabel) && <Link className="button button-light" to={String(settings.destination ?? '/collections')}>{String(settings.buttonLabel)}</Link>}</div></section>
     return null
   })}</>

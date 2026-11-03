@@ -2,7 +2,7 @@ import { Schema, model } from 'mongoose'
 
 const sectionSchema = new Schema({
   id: { type: String, required: true },
-  type: { type: String, required: true, enum: ['hero', 'featured-products', 'new-arrivals', 'collection', 'categories', 'editorial', 'brand', 'featured-release', 'newsletter', 'footer-announcement', 'rich-text'] },
+  type: { type: String, required: true, enum: ['hero', 'featured-products', 'new-arrivals', 'collection', 'categories', 'editorial', 'brand', 'featured-release', 'newsletter', 'instagram-feed', 'footer-announcement', 'rich-text'] },
   title: { type: String, default: '', maxlength: 160 },
   enabled: { type: Boolean, default: true },
   order: { type: Number, required: true, min: 0 },

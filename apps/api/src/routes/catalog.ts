@@ -7,12 +7,16 @@ import { Product } from '../models/Product.js'
 import { WebsiteConfig } from '../models/WebsiteConfig.js'
 
 const router = Router()
+const repeatedQueryValue = (maxLength: number) => z.preprocess(
+  value => value === undefined ? [] : Array.isArray(value) ? value : [value],
+  z.array(z.string().trim().min(1).max(maxLength)).max(30),
+).transform(values => [...new Set(values)])
 const querySchema = z.object({
   q: z.string().trim().max(100).optional(),
   category: z.string().trim().max(100).optional(),
-  collection: z.string().trim().max(100).optional(),
+  collection: repeatedQueryValue(100),
   size: z.string().trim().max(20).optional(),
-  color: z.string().trim().max(60).optional(),
+  color: repeatedQueryValue(60),
   price: z.coerce.number().min(0).optional(),
   sort: z.enum(['featured', 'newest', 'price-asc', 'price-desc', 'manual']).default('featured'),
   page: z.coerce.number().int().min(1).default(1),
@@ -36,22 +40,24 @@ router.get('/products', async (request, response, next) => {
     }
     let collectionScope = ''
     let collectionProductOrder: string[] = []
-    if (collection) {
-      const selectedCollection = await Collection.findOne({ slug: slugify(collection), status: 'active' }).select('_id productIds').lean()
-      if (!selectedCollection) {
+    if (collection.length) {
+      const selectedCollections = await Collection.find({ slug: { $in: collection.map(slugify) }, status: 'active' }).select('_id slug productIds').lean()
+      if (selectedCollections.length !== collection.length) {
         response.status(404).json({ error: { code: 'COLLECTION_NOT_FOUND', message: 'Collection not found.' } })
         return
       }
-      collectionScope = `collection:${String(selectedCollection._id)}`
-      collectionProductOrder = selectedCollection.productIds.map(id => String(id))
-      filter._id = { $in: selectedCollection.productIds }
+      if (selectedCollections.length === 1) {
+        collectionScope = `collection:${String(selectedCollections[0]._id)}`
+        collectionProductOrder = selectedCollections[0].productIds.map(id => String(id))
+      }
+      filter._id = { $in: [...new Set(selectedCollections.flatMap(item => item.productIds.map(id => String(id))))] }
     }
     if (category) filter.category = new RegExp(`^${escapeRegex(category)}$`, 'i')
     if (q) filter.$or = ['name', 'shortDescription', 'description'].map((field) => ({ [field]: new RegExp(escapeRegex(q), 'i') }))
-    if (size || color) {
+    if (size || color.length) {
       const variant: Record<string, unknown> = { active: true, stock: { $gt: 0 } }
       if (size) variant.size = new RegExp(`^${escapeRegex(size)}$`, 'i')
-      if (color) variant.color = new RegExp(`^${escapeRegex(color)}$`, 'i')
+      if (color.length) variant.color = { $in: color.map(value => new RegExp(`^${escapeRegex(value)}$`, 'i')) }
       filter.variants = { $elemMatch: variant }
     }
     if (price !== undefined) filter.price = { $lte: price }

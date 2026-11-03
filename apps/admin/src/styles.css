@@ -10,7 +10,7 @@
   --paper: #fff;
   --ink: #171918;
   --muted: #898c88;
-  --line: #e8e9e5;
+  --line: #313131;
   --green: #47775a;
   --sage: #eaf2ec;
   --serif: 'Playfair Display', Georgia, serif
@@ -1653,6 +1653,78 @@ td b {
   font-size: 10px
 }
 
+.website-instagram-picker {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  padding: 10px
+}
+
+.website-instagram-picker legend {
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600
+}
+
+.website-instagram-picker>.admin-note {
+  margin: 0
+}
+
+.website-selection-card-editor {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  padding: 10px
+}
+
+.website-selection-card-editor legend {
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600
+}
+
+.website-selection-card-editor>.admin-note {
+  margin: 0
+}
+
+.website-selection-card-fields {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: #faf9f6
+}
+
+.website-selection-card-fields>b {
+  font-size: 11px;
+  letter-spacing: .12em
+}
+
+.website-section-settings:has(.website-selection-card-editor) > label:has(select),
+.website-section-settings:has(.website-selection-card-editor) > label:has(select) + .admin-note,
+.website-section-settings:has(.website-selection-card-editor) > .website-product-picker {
+  display: none
+}
+
+.website-instagram-post {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  background: #faf9f6
+}
+
+.website-instagram-actions {
+  display: flex;
+  gap: 6px
+}
+
+.website-instagram-actions .admin-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px
+}
+
 .website-product-picker label {
   display: flex;
   align-items: center;
@@ -1705,6 +1777,32 @@ td b {
   gap: 8px;
   align-items: center;
   margin-bottom: 8px
+}
+
+.website-header-link-edit {
+  grid-template-columns: 1fr 1.4fr auto auto auto;
+}
+
+.website-order-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.website-order-controls .admin-button {
+  justify-content: center;
+  min-width: 32px;
+  padding-inline: 7px;
+}
+
+.website-footer-group {
+  margin-bottom: 20px;
+}
+
+.website-footer-group-heading {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
 }
 
 .website-link-edit input {
@@ -1844,6 +1942,14 @@ td b {
 
   .website-link-edit {
     grid-template-columns: 1fr 1fr
+  }
+
+  .website-header-link-edit {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .website-footer-group-heading {
+    grid-template-columns: 1fr auto;
   }
 
   .website-header-actions {

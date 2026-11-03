@@ -17,7 +17,7 @@ import { Category } from '../models/Category.js'
 
 const router = Router()
 const uploadRoot = fileURLToPath(new URL('../../uploads/', import.meta.url))
-const sectionTypes = ['hero', 'featured-products', 'new-arrivals', 'collection', 'categories', 'editorial', 'brand', 'featured-release', 'newsletter', 'footer-announcement', 'rich-text'] as const
+const sectionTypes = ['hero', 'featured-products', 'new-arrivals', 'collection', 'categories', 'editorial', 'brand', 'featured-release', 'newsletter', 'instagram-feed', 'footer-announcement', 'rich-text'] as const
 const safeUrl = z.string().trim().max(2048).refine(value => {
   if (value === '') return true
   if (/^[\u0000-\u0020]/.test(value) || /["'<>\\]/.test(value)) return false
@@ -32,12 +32,20 @@ const sectionSchema = z.object({
   order: z.number().int().min(0).max(100),
   settings: z.record(z.unknown()).default({}),
 }).superRefine((section, context) => {
-  for (const key of ['heading', 'subtitle', 'description', 'eyebrow', 'buttonLabel', 'destination', 'image', 'mobileImage', 'imageAlt']) {
+  for (const key of ['heading', 'subtitle', 'description', 'eyebrow', 'buttonLabel', 'destination', 'image', 'mobileImage', 'imageAlt', 'instagramUrl']) {
     const value = section.settings[key]
     if (value === undefined) continue
     if (typeof value !== 'string' || value.length > (key === 'description' ? 3000 : 2048)) { context.addIssue({ code: z.ZodIssueCode.custom, path: ['settings', key], message: 'This text field is invalid or too long.' }); continue }
-    if (['destination', 'image', 'mobileImage'].includes(key) && !safeUrl.safeParse(value).success) context.addIssue({ code: z.ZodIssueCode.custom, path: ['settings', key], message: 'Use a local path or secure HTTPS URL.' })
+    if (['destination', 'image', 'mobileImage', 'instagramUrl'].includes(key) && !safeUrl.safeParse(value).success) context.addIssue({ code: z.ZodIssueCode.custom, path: ['settings', key], message: 'Use a local path or secure HTTPS URL.' })
   }
+  const instagramPosts = section.settings.instagramPosts
+  if (instagramPosts !== undefined && (!Array.isArray(instagramPosts) || instagramPosts.length > 12 || instagramPosts.some(post => {
+    if (!post || typeof post !== 'object' || Array.isArray(post)) return true
+    const item = post as Record<string, unknown>
+    return typeof item.imageUrl !== 'string' || !safeUrl.safeParse(item.imageUrl).success
+      || (item.postUrl !== undefined && (typeof item.postUrl !== 'string' || !safeUrl.safeParse(item.postUrl).success))
+      || Object.keys(item).some(key => !['imageUrl', 'postUrl'].includes(key))
+  }))) context.addIssue({ code: z.ZodIssueCode.custom, path: ['settings', 'instagramPosts'], message: 'Instagram posts must contain a safe image URL and an optional safe post URL.' })
   const productIds = section.settings.productIds
   if (productIds !== undefined && (!Array.isArray(productIds) || productIds.length > 100 || productIds.some(id => typeof id !== 'string' || !mongoose.isValidObjectId(id)) || new Set(productIds).size !== productIds.length)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['settings', 'productIds'], message: 'Choose valid, unique product identifiers.' })
   const productImages = section.settings.productImages
@@ -46,6 +54,18 @@ const sectionSchema = z.object({
   if (collectionId !== undefined && (typeof collectionId !== 'string' || !mongoose.isValidObjectId(collectionId))) context.addIssue({ code: z.ZodIssueCode.custom, path: ['settings', 'collectionId'], message: 'Choose a valid collection.' })
   const categoryItems = section.settings.categoryItems
   if (categoryItems !== undefined && (!Array.isArray(categoryItems) || categoryItems.length > 100 || categoryItems.some(item => !item || typeof item !== 'object' || typeof (item as any).categoryId !== 'string' || !mongoose.isValidObjectId((item as any).categoryId) || ['title', 'description', 'image', 'destination'].some(key => (item as any)[key] !== undefined && (typeof (item as any)[key] !== 'string' || String((item as any)[key]).length > 2048)) || ['image', 'destination'].some(key => (item as any)[key] !== undefined && !safeUrl.safeParse((item as any)[key]).success)) || new Set(categoryItems.map((item: any) => item?.categoryId)).size !== categoryItems.length)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['settings', 'categoryItems'], message: 'Category display overrides are invalid.' })
+  const selectionCards = section.settings.selectionCards
+  if (selectionCards !== undefined && (section.type !== 'featured-products' || !Array.isArray(selectionCards) || selectionCards.length !== 3 || selectionCards.some((card: unknown) => {
+    if (!card || typeof card !== 'object' || Array.isArray(card)) return true
+    const item = card as Record<string, unknown>
+    return typeof item.title !== 'string' || item.title.trim().length === 0 || item.title.length > 80
+      || typeof item.description !== 'string' || item.description.length > 200
+      || typeof item.productId !== 'string' || !mongoose.isValidObjectId(item.productId)
+      || (item.collectionId !== undefined && (typeof item.collectionId !== 'string' || !mongoose.isValidObjectId(item.collectionId)))
+      || typeof item.background !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(item.background)
+      || (item.destination !== undefined && (typeof item.destination !== 'string' || !safeUrl.safeParse(item.destination).success))
+      || Object.keys(item).some(key => !['title', 'description', 'productId', 'collectionId', 'background', 'destination'].includes(key))
+  }))) context.addIssue({ code: z.ZodIssueCode.custom, path: ['settings', 'selectionCards'], message: 'Selection cards must include three valid titles, products, backgrounds, and optional safe destinations.' })
   if (section.settings.mode !== undefined && !['automatic', 'manual', 'collection'].includes(String(section.settings.mode))) context.addIssue({ code: z.ZodIssueCode.custom, path: ['settings', 'mode'], message: 'Product selection mode is not supported.' })
   if (section.settings.mode === 'manual' && (!Array.isArray(productIds) || productIds.length === 0) && ['hero', 'featured-products', 'new-arrivals'].includes(section.type)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['settings', 'productIds'], message: 'Select at least one product for manual display.' })
   if (section.settings.limit !== undefined && (typeof section.settings.limit !== 'number' || !Number.isInteger(section.settings.limit) || section.settings.limit < 1 || section.settings.limit > 24)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['settings', 'limit'], message: 'Product count must be between 1 and 24.' })
@@ -53,9 +73,12 @@ const sectionSchema = z.object({
 })
 const sectionsSchema = z.array(sectionSchema).max(30).refine(items => new Set(items.map(item => item.id)).size === items.length, 'Section identifiers must be unique.')
 async function productReferencesExist(sections: z.infer<typeof sectionsSchema>) {
-  const ids = [...new Set(sections.flatMap(section => [...(Array.isArray(section.settings.productIds) ? section.settings.productIds.filter((id): id is string => typeof id === 'string') : []), ...(section.settings.productImages && typeof section.settings.productImages === 'object' && !Array.isArray(section.settings.productImages) ? Object.keys(section.settings.productImages) : [])]))]
+  const ids = [...new Set(sections.flatMap(section => [...(Array.isArray(section.settings.productIds) ? section.settings.productIds.filter((id): id is string => typeof id === 'string') : []), ...(section.settings.productImages && typeof section.settings.productImages === 'object' && !Array.isArray(section.settings.productImages) ? Object.keys(section.settings.productImages) : []), ...(Array.isArray(section.settings.selectionCards) ? section.settings.selectionCards.map((card: unknown) => card && typeof card === 'object' && !Array.isArray(card) ? (card as Record<string, unknown>).productId : undefined).filter((id: unknown): id is string => typeof id === 'string') : [])]))]
   if (ids.length && await Product.countDocuments({ _id: { $in: ids }, status: 'active' }) !== ids.length) return false
-  const collectionIds = [...new Set(sections.map(section => section.settings.collectionId).filter((id): id is string => typeof id === 'string'))]
+  const collectionIds = [...new Set(sections.flatMap(section => [
+    ...(typeof section.settings.collectionId === 'string' ? [section.settings.collectionId] : []),
+    ...(Array.isArray(section.settings.selectionCards) ? section.settings.selectionCards.map((card: unknown) => card && typeof card === 'object' && !Array.isArray(card) ? (card as Record<string, unknown>).collectionId : undefined).filter((id: unknown): id is string => typeof id === 'string') : []),
+  ]))]
   if (collectionIds.length && await Collection.countDocuments({ _id: { $in: collectionIds }, status: 'active' }) !== collectionIds.length) return false
   const categoryIds = [...new Set(sections.flatMap(section => Array.isArray(section.settings.categoryItems) ? section.settings.categoryItems.map((item: any) => item.categoryId).filter((id: unknown): id is string => typeof id === 'string') : []))]
   if (categoryIds.length && await Category.countDocuments({ _id: { $in: categoryIds }, status: 'active' }) !== categoryIds.length) return false
@@ -76,6 +99,7 @@ const defaultSections = (slug: string) => slug === 'home' ? [
   { id: 'editorial', type: 'editorial', title: 'OFF / STUDIO', enabled: true, order: 2, settings: { eyebrow: 'DRESS WITH INTENTION', image: 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1300&q=85', heading: 'Uniform for the unordinary.', description: 'Essential forms. Unexpected details. A wardrobe designed to move with you.', buttonLabel: 'Explore ready-to-wear', destination: '/shop' } },
   { id: 'featured', type: 'featured-products', title: 'Featured products', enabled: true, order: 3, settings: { heading: 'The OFF selection', productIds: [], limit: 3, showPrices: true } },
   { id: 'newsletter', type: 'newsletter', title: 'Newsletter', enabled: true, order: 4, settings: { heading: 'Join the OFF list', description: 'Notes from the studio and new arrivals.' } },
+  { id: 'instagram-feed', type: 'instagram-feed', title: 'Instagram feed', enabled: true, order: 5, settings: { heading: 'FOLLOW US', subtitle: 'OFF / COMMUNITY' } },
 ] : []
 
 router.use(authenticateAdmin)
@@ -106,7 +130,7 @@ function uploadInfo(mimeType: string, bytes: Buffer) {
     while (offset + 9 < bytes.length) {
       if (bytes[offset] !== 0xff) { offset += 1; continue }
       const marker = bytes[offset + 1]; const size = bytes.readUInt16BE(offset + 2)
-      if ([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker)) { height = bytes.readUInt16BE(offset + 5); width = bytes.readUInt16BE(offset + 7); break }
+      if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) { height = bytes.readUInt16BE(offset + 5); width = bytes.readUInt16BE(offset + 7); break }
       if (size < 2) break
       offset += size + 2
     }

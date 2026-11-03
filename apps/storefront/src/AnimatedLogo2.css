@@ -1,0 +1,365 @@
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap");
+
+.off-motion {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  container-type: inline-size;
+  overflow: hidden;
+  color: var(--off-color, currentColor);
+}
+
+.off-motion * {
+  box-sizing: border-box;
+}
+
+.off-layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: var(--off-color, currentColor);
+}
+
+.off-mask {
+  position: absolute;
+  inset: 0;
+}
+
+.off-mtop {
+  clip-path: inset(0 0 51.35% 0);
+}
+
+.off-mbot {
+  clip-path: inset(51.35% 0 0 0);
+}
+
+.off-vline {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1cqw;
+  height: min(34.57cqw, 68%);
+  background: #DA291C;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(.2, .1);
+  transform-origin: center center;
+}
+
+.off-tagline {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  padding-left: .42em;
+  color: var(--off-color, currentColor);
+  font: 500 3.4cqw/1 "Archivo", "Helvetica Neue", Arial, sans-serif;
+  font-variation-settings: "wdth" 125;
+  letter-spacing: .42em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  translate: -50% -50%;
+}
+
+.off-tagline .ch {
+  display: block;
+}
+
+.off-tagline .sp {
+  display: block;
+  width: .8em;
+}
+
+.off-play .ch {
+  animation: off-tagIn .9s cubic-bezier(.2, .7, .1, 1) calc(.3s + var(--i) * .05s) both;
+}
+
+.off-play .off-tagline {
+  animation: off-squeeze .75s cubic-bezier(.7, 0, .84, 0) 2.5s both;
+}
+
+.off-play .off-vline {
+  animation: off-spin 3.7s linear 3.1s both;
+}
+
+.off-play .off-bar {
+  animation: off-barOn .05s linear 6s both;
+}
+
+.off-play .off-top {
+  animation: off-topIn 1.1s cubic-bezier(.2, .75, .1, 1) 6.1s both;
+}
+
+.off-play .off-bot {
+  animation: off-botIn 1.1s cubic-bezier(.2, .75, .1, 1) 6.1s both;
+}
+
+.off-reverse.off-play .ch {
+  animation: none;
+}
+
+.off-reverse.off-play .off-tagline {
+  animation: off-reverse-text 7.3s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.off-reverse.off-play .off-vline {
+  animation: off-reverse-line 7.3s ease both;
+}
+
+.off-reverse.off-play .off-bar {
+  animation: off-reverse-bar 7.3s ease both;
+}
+
+.off-reverse.off-play .off-top {
+  animation: off-reverse-top 7.3s ease both;
+}
+
+.off-reverse.off-play .off-bot {
+  animation: off-reverse-bot 7.3s ease both;
+}
+
+.off-resume-forward.off-play .ch {
+  animation: none;
+}
+
+.off-resume-forward.off-play .off-tagline {
+  animation: off-squeeze .75s cubic-bezier(.7, 0, .84, 0) both;
+}
+
+.off-resume-forward.off-play .off-vline {
+  animation: off-spin 3.7s linear .6s both;
+}
+
+.off-resume-forward.off-play .off-bar {
+  animation: off-barOn .05s linear 3.5s both;
+}
+
+.off-resume-forward.off-play .off-top {
+  animation: off-topIn 1.1s cubic-bezier(.2, .75, .1, 1) 3.6s both;
+}
+
+.off-resume-forward.off-play .off-bot {
+  animation: off-botIn 1.1s cubic-bezier(.2, .75, .1, 1) 3.6s both;
+}
+
+.off-play .off-bar,
+.off-play .off-top,
+.off-play .off-bot {
+  opacity: 0;
+}
+
+.off-out .off-layer {
+  opacity: 0;
+  transition: opacity .5s ease;
+}
+
+@keyframes off-tagIn {
+  from {
+    opacity: 0;
+    transform: translateY(.55em);
+    filter: blur(.35em);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes off-squeeze {
+  from {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+
+  80% {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: scaleX(.004);
+  }
+}
+
+@keyframes off-spin {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(0deg) scale(.2, .1);
+  }
+
+  .5% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(0deg) scale(.2, .1);
+    animation-timing-function: cubic-bezier(.2, .8, .2, 1);
+  }
+
+  16% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(0deg) scale(.2, 1);
+    animation-timing-function: cubic-bezier(.65, 0, .2, 1);
+  }
+
+  54% {
+    transform: translate(-50%, -50%) rotate(825deg) scale(.2, 1);
+    animation-timing-function: ease-out;
+  }
+
+  62% {
+    transform: translate(-50%, -50%) rotate(810deg) scale(.2, 1);
+    animation-timing-function: cubic-bezier(.7, 0, .2, 1);
+  }
+
+  78% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(810deg) scale(1, 1);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(810deg) scale(1, 1);
+  }
+}
+
+@keyframes off-barOn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes off-topIn {
+  from {
+    opacity: 0;
+    transform: translateY(28%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes off-botIn {
+  from {
+    opacity: 0;
+    transform: translateY(-28%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes off-reverse-top {
+  0%,
+  4% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  15% {
+    opacity: 0;
+    transform: translateY(28%);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(28%);
+  }
+}
+
+@keyframes off-reverse-bot {
+  0%,
+  4% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  15% {
+    opacity: 0;
+    transform: translateY(-28%);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-28%);
+  }
+}
+
+@keyframes off-reverse-bar {
+  0%,
+  4% {
+    opacity: 1;
+  }
+
+  15%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes off-reverse-line {
+  0%,
+  15% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(810deg) scale(1, 1);
+  }
+
+  22% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(810deg) scale(.2, 1);
+  }
+
+  48% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(0deg) scale(.2, 1);
+  }
+
+  64%,
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(0deg) scale(.2, 0);
+  }
+}
+
+@keyframes off-reverse-text {
+  0%,
+  47% {
+    clip-path: inset(0 50%);
+    opacity: 0;
+  }
+
+  65%,
+  100% {
+    clip-path: inset(0 0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .off-play *,
+  .off-out .off-layer {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .off-play .off-bar,
+  .off-play .off-top,
+  .off-play .off-bot {
+    opacity: 1;
+    transform: none;
+  }
+
+  .off-tagline,
+  .off-vline {
+    opacity: 0;
+  }
+}
