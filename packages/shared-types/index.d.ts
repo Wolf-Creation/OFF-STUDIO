@@ -181,6 +181,7 @@ export interface StoreContent {
   campaignTitle: string
   freeShippingThreshold: number
   supportEmail: string
+  onlinePaymentEnabled?: boolean
 }
 
 export interface StoreSettings extends StoreContent {
@@ -205,6 +206,7 @@ export interface CashOnDeliveryOrderRequest {
   shippingAddress: ApiShippingAddress & { country: 'TN'; governorate: string; delegation: string }
   items: { productId: string; sku: string; quantity: number }[]
   orderNote?: string
+  analyticsAttribution?: { visitorId: string; sessionId: string }
 }
 
 export interface CashOnDeliveryOrderResponse {

@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
 import cors from 'cors'
 import express, { type ErrorRequestHandler } from 'express'
 import rateLimit from 'express-rate-limit'
@@ -16,6 +16,9 @@ import { WebsitePage } from './models/WebsitePage.js'
 import { ContentRevision } from './models/ContentRevision.js'
 import { WebsiteConfig } from './models/WebsiteConfig.js'
 import { MediaAsset } from './models/MediaAsset.js'
+import { CookieConsentLog } from './models/CookieConsentLog.js'
+import { AnalyticsEvent } from './models/AnalyticsEvent.js'
+import { loadRuntimeEnv, getDatabaseVerification, isOnlinePaymentEnabled, normalizeMongoUri, verifyMongoTarget } from './runtimeConfig.js'
 import { adminPreviewRouter } from './routes/adminPreview.js'
 import { accountRouter } from './routes/account.js'
 import { authRouter } from './routes/auth.js'
@@ -26,11 +29,28 @@ import { paymentsRouter } from './routes/payments.js'
 import { seedDemoData } from './seed.js'
 import { storefrontRouter } from './routes/storefront.js'
 import { websiteAdminRouter } from './routes/websiteAdmin.js'
+import { analyticsRouter, invalidateAnalyticsOverviewCache } from './routes/analytics.js'
+import { newsletterRouter } from './routes/newsletter.js'
+
+loadRuntimeEnv()
+
+const booleanEnv = z.preprocess((value) => {
+  if (typeof value !== 'string') return value
+  const normalized = value.trim().toLowerCase()
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true
+  if (['false', '0', 'no', 'off', ''].includes(normalized)) return false
+  return value
+}, z.boolean().default(false))
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(5000),
   MONGODB_URI: z.string().url().optional().or(z.literal('')),
+  MONGODB_DB_NAME: z.preprocess(value => value === '' ? undefined : value, z.string().optional()),
+  MONGODB_EXPECTED_DB_NAME: z.preprocess(value => value === '' ? undefined : value, z.string().optional()),
+  MONGODB_EXPECTED_CLUSTER_HOST: z.preprocess(value => value === '' ? undefined : value, z.string().optional()),
+  ONLINE_PAYMENT_ENABLED: booleanEnv.default(false),
+  ALLOW_SYNTHETIC_DATA: booleanEnv.default(false),
   FRONTEND_URL: z.string().url().default('http://localhost:5173'),
   ADMIN_URL: z.string().url().default('http://localhost:5174'),
   ADMIN_EMAIL: z.preprocess(value => value === '' ? undefined : value, z.string().email().optional()),
@@ -62,10 +82,19 @@ app.use(cors({
   credentials: true,
 }))
 app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false }))
+app.use((request, response, next) => {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    invalidateAnalyticsOverviewCache()
+    response.once('finish', invalidateAnalyticsOverviewCache)
+  }
+  next()
+})
 app.use('/api/v1/payments', paymentsRouter)
 app.use(express.json({ limit: '1mb' }))
 app.use('/api/v1', catalogRouter)
 app.use('/api/v1/store', storefrontRouter)
+app.use('/api/v1/newsletter', newsletterRouter)
+app.use('/api/v1/analytics', analyticsRouter)
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1/account', accountRouter)
 app.use('/api/v1/customers', customerRouter)
@@ -82,10 +111,16 @@ app.use('/media', express.static(fileURLToPath(new URL('../uploads/', import.met
 
 app.get('/api/v1/health', (_request, response) => {
   const databaseReady = mongoose.connection.readyState === 1
+  const verification = getDatabaseVerification(process.env)
   response.status(databaseReady ? 200 : 503).json({
     status: databaseReady ? 'ready' : 'database-not-connected',
     database: databaseReady ? 'connected' : 'not-connected',
     mode: config.NODE_ENV,
+    databaseName: mongoose.connection.name || verification.databaseName || null,
+    clusterHost: mongoose.connection.host || verification.clusterHost || null,
+    targetVerified: verification.targetVerified,
+    onlinePaymentEnabled: isOnlinePaymentEnabled(),
+    syntheticDataPermission: verification.syntheticDataPermission,
   })
 })
 
@@ -118,6 +153,8 @@ const errorHandler: ErrorRequestHandler = (error: unknown, _request, response, _
 app.use(errorHandler)
 
 async function start() {
+  const databaseVerification = getDatabaseVerification(process.env)
+  verifyMongoTarget(process.env)
   if (config.NODE_ENV === 'production') {
     const missing = [
       !config.MONGODB_URI && 'MONGODB_URI',
@@ -128,39 +165,44 @@ async function start() {
     if (missing.length) throw new Error(`Missing required production configuration: ${missing.join(', ')}`)
   }
   if (config.MONGODB_URI) {
-    await mongoose.connect(config.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
-    await Promise.all([Category.init(), Collection.init(), Product.init(), Customer.init(), Order.init(), StoreConfig.init(), WebsitePage.init(), WebsiteConfig.init(), ContentRevision.init(), MediaAsset.init()])
-    await Order.collection.updateMany({ paymentMethod: 'stripe', gatewayPaymentStatus: { $exists: false } }, [{ $set: { gatewayPaymentStatus: { $switch: { branches: [{ case: { $eq: ['$paymentStatus', 'paid'] }, then: 'paid' }, { case: { $in: ['$paymentStatus', ['failed', 'refunded']] }, then: 'failed' }], default: 'pending' } } } }])
-    const remapLegacyStatus = (value: string) => ({ $switch: { branches: [{ case: { $eq: [value, 'pending'] }, then: 'confirmation' }, { case: { $eq: [value, 'shipped'] }, then: 'in_delivery' }, { case: { $eq: [value, 'completed'] }, then: 'delivered' }], default: value } })
-    await Order.collection.updateMany({ $or: [{ fulfillmentStatus: { $in: ['pending', 'shipped', 'completed'] } }, { 'statusHistory.status': { $in: ['pending', 'shipped', 'completed'] } }] }, [{ $set: { fulfillmentStatus: remapLegacyStatus('$fulfillmentStatus'), statusHistory: { $map: { input: { $ifNull: ['$statusHistory', []] }, as: 'entry', in: { $mergeObjects: ['$$entry', { status: remapLegacyStatus('$$entry.status'), previousStatus: { $cond: [{ $in: ['$$entry.previousStatus', ['pending', 'processing', 'shipped', 'completed', 'cancelled']] }, remapLegacyStatus('$$entry.previousStatus'), '$$REMOVE'] } }] } } } } }])
-    await Order.collection.updateMany({}, [{ $set: { paymentStatus: { $cond: [{ $eq: ['$fulfillmentStatus', 'delivered'] }, 'paid', 'unpaid'] } } }])
-    const [currencyMigration] = await Promise.all([
-      Order.updateMany({ currency: 'USD' }, { $set: { currency: 'TND' } }),
-      StoreConfig.updateOne(
+    const mongoUri = normalizeMongoUri(config.MONGODB_URI)
+    try {
+      await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 5000 })
+    } catch (error) {
+      if (config.NODE_ENV === 'production') throw error
+      console.error('Unable to connect to MongoDB; database-backed API routes will be unavailable:', error instanceof Error ? error.name : 'Unknown error')
+    }
+    if (mongoose.connection.readyState === 1) {
+      const { name, host } = mongoose.connection
+      verifyMongoTarget(process.env, { databaseName: name, host })
+      console.info(`MongoDB connected: database=${name || databaseVerification.databaseName || 'unknown'}, host=${host || databaseVerification.clusterHost || 'unknown'}, env=${config.NODE_ENV}`)
+      await Promise.all([Category.init(), Collection.init(), Product.init(), Customer.init(), Order.init(), StoreConfig.init(), WebsitePage.init(), WebsiteConfig.init(), ContentRevision.init(), MediaAsset.init(), CookieConsentLog.init(), AnalyticsEvent.init()])
+      await StoreConfig.updateOne(
         { key: 'store', announcement: 'Complimentary shipping on orders over $500' },
         { $set: { announcement: 'Complimentary shipping on orders over 500 TND' } },
-      ),
-    ])
-    if (currencyMigration.modifiedCount > 0) {
-      console.info(`Updated ${currencyMigration.modifiedCount} existing order currency labels to TND without changing amounts.`)
-    }
-    if (config.NODE_ENV === 'development') {
-      const seeded = await seedDemoData()
-      console.info('OFF demo data check complete:', seeded)
-    }
-    const publishScheduled = async () => {
-      const duePages = await WebsitePage.find({ status: 'scheduled', scheduledAt: { $lte: new Date() } })
-      for (const page of duePages) {
-        page.publishedSections = page.draftSections
-        page.publishedVersion = page.draftVersion
-        page.publishedAt = new Date()
-        page.scheduledAt = null
-        page.status = 'published'
-        await page.save()
-        await ContentRevision.create({ resourceType: page.slug === 'home' ? 'homepage' : 'page', resourceId: String(page._id), version: page.publishedVersion, snapshot: page.publishedSections, status: 'published', publishedAt: page.publishedAt })
+      )
+      if (config.NODE_ENV === 'development') {
+        const seeded = await seedDemoData()
+        console.info('OFF demo data check complete:', seeded)
+      } else if (config.NODE_ENV === 'staging') {
+        console.info('Synthetic staging seed is disabled until explicitly run via the protected staging seed command.')
       }
+      const publishScheduled = async () => {
+        const duePages = await WebsitePage.find({ status: 'scheduled', scheduledAt: { $lte: new Date() } })
+        for (const page of duePages) {
+          page.publishedSections = page.draftSections
+          page.publishedVersion = page.draftVersion
+          page.publishedAt = new Date()
+          page.scheduledAt = null
+          page.status = 'published'
+          await page.save()
+          await ContentRevision.create({ resourceType: page.slug === 'home' ? 'homepage' : 'page', resourceId: String(page._id), version: page.publishedVersion, snapshot: page.publishedSections, status: 'published', publishedAt: page.publishedAt })
+        }
+      }
+      setInterval(() => { void publishScheduled().catch(error => console.error('Scheduled website publication failed:', error instanceof Error ? error.name : 'Unknown error')) }, 15_000)
+    } else {
+      console.warn('MongoDB is not connected; sign-in and database-independent API routes remain available.')
     }
-    setInterval(() => { void publishScheduled().catch(error => console.error('Scheduled website publication failed:', error instanceof Error ? error.name : 'Unknown error')) }, 15_000)
   } else if (config.NODE_ENV === 'production') {
     throw new Error('MONGODB_URI is required in production.')
   } else {

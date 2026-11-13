@@ -39,10 +39,31 @@ const orderStatusEntrySchema = new Schema(
   { _id: false },
 )
 
+const paymentHistoryEntrySchema = new Schema({
+  action: { type: String, enum: ['confirmation_reversed'], required: true },
+  previousStatus: { type: String, enum: ['unpaid', 'paid'], required: true },
+  paymentStatus: { type: String, enum: ['unpaid', 'paid'], required: true },
+  changedAt: { type: Date, required: true },
+  changedBy: { type: String, default: '', trim: true, maxlength: 254 },
+  reason: { type: String, required: true, trim: true, maxlength: 500 },
+})
+
+const analyticsTouchSchema = new Schema({
+  source: { type: String, maxlength: 253 },
+  medium: { type: String, maxlength: 120 },
+  campaign: { type: String, maxlength: 120 },
+  content: { type: String, maxlength: 120 },
+  term: { type: String, maxlength: 120 },
+}, { _id: false })
+
 const orderSchema = new Schema(
   {
     orderNumber: { type: String, required: true, unique: true, trim: true },
     qrTokenHash: { type: String, unique: true, sparse: true, select: false },
+    isSynthetic: { type: Boolean, default: false },
+    seedRunId: { type: String, default: '', trim: true, maxlength: 120 },
+    seedScenario: { type: String, default: '', trim: true, maxlength: 120 },
+    createdBySeed: { type: Boolean, default: false },
     customerId: { type: Schema.Types.ObjectId, ref: 'Customer', required: true, index: true },
     customerName: { type: String, required: true, trim: true },
     customerEmail: { type: String, required: true, lowercase: true, trim: true },
@@ -58,15 +79,25 @@ const orderSchema = new Schema(
     paymentStatus: { type: String, enum: ['unpaid', 'paid'], default: 'unpaid' },
     gatewayPaymentStatus: { type: String, enum: ['pending', 'paid', 'failed'] },
     paymentMethod: { type: String, enum: ['stripe', 'cash_on_delivery'], default: 'stripe' },
+    paymentHistory: { type: [paymentHistoryEntrySchema], default: [] },
     fulfillmentStatus: { type: String, enum: ['confirmation', 'processing', 'in_delivery', 'delivered', 'returned', 'cancelled', 'exchange'], default: 'confirmation', index: true },
     statusHistory: { type: [orderStatusEntrySchema], default: [] },
     trackingNumber: { type: String, default: '', trim: true, maxlength: 100 },
     source: { type: String, enum: ['online', 'manual'], default: 'online', index: true },
     checkoutSessionId: { type: String, sparse: true, unique: true },
+    analyticsVisitorId: { type: String, maxlength: 36, select: false },
+    analyticsSessionId: { type: String, maxlength: 36, select: false },
+    analyticsFirstTouch: { type: analyticsTouchSchema, select: false },
+    analyticsLastTouch: { type: analyticsTouchSchema, select: false },
     stripePaymentIntentId: { type: String, default: '' },
     placedAt: { type: Date, required: true },
   },
   { timestamps: true },
 )
+
+orderSchema.index({ analyticsSessionId: 1, placedAt: -1 })
+orderSchema.index({ customerId: 1, paymentStatus: 1, fulfillmentStatus: 1, placedAt: 1 })
+orderSchema.index({ analyticsVisitorId: 1, placedAt: -1 }, { sparse: true })
+orderSchema.index({ paymentStatus: 1, fulfillmentStatus: 1, placedAt: -1 })
 
 export const Order = model('Order', orderSchema)

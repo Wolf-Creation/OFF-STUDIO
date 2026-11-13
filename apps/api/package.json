@@ -7,7 +7,14 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "verify:staging-db": "node --import tsx src/verifyStagingDb.ts",
+    "seed:plan": "node --import tsx src/seedSynthetic.ts plan",
+    "seed:validate": "node --import tsx src/seedSynthetic.ts validate",
+    "seed:stats": "node --import tsx src/seedSynthetic.ts stats",
+    "seed:scenario": "node --import tsx src/seedSynthetic.ts scenario",
+    "seed:generate": "node --import tsx src/seedSynthetic.ts generate",
+    "seed:test": "node --import tsx --test test/syntheticSeed.test.ts"
   },
   "dependencies": {
     "@clerk/backend": "^3.26.2",

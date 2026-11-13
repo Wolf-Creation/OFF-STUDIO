@@ -1,0 +1,429 @@
+.header-navigation .header-mega-trigger {
+  position: relative;
+  display: inline-flex;
+  min-height: 62px;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #4a4a4a;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.header-navigation .header-mega-trigger::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: #da291c;
+  content: "";
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .18s ease;
+}
+
+.header-navigation .header-mega-trigger:hover,
+.header-navigation .header-mega-trigger.active {
+  color: #111;
+}
+
+.header-navigation .header-mega-trigger.active::after {
+  transform: scaleX(1);
+}
+
+.header-mega-trigger svg {
+  transition: transform .18s ease;
+}
+
+.header-mega-trigger[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.header-mega-trigger:focus-visible {
+  outline: 2px solid #111;
+  outline-offset: 4px;
+}
+
+.mega-menu-backdrop {
+  position: fixed;
+  z-index: 18;
+  inset: var(--mega-menu-top, 112px) 0 0;
+  width: 100%;
+  border: 0;
+  background: rgb(17 17 17 / 38%);
+  cursor: default;
+  animation: mega-menu-fade-in .18s ease both;
+}
+
+.mega-menu-panel {
+  position: fixed;
+  z-index: 21;
+  top: var(--mega-menu-top, 112px);
+  right: 0;
+  left: 0;
+  max-height: calc(100vh - var(--mega-menu-top, 112px));
+  overflow: auto;
+  border-top: 2px solid #da291c;
+  border-bottom: 1px solid #111;
+  background: #f7f6f2;
+  box-shadow: 0 24px 48px rgb(17 17 17 / 12%);
+  animation: mega-menu-open .18s ease both;
+}
+
+.mega-menu-content {
+  display: grid;
+  width: min(100%, 1440px);
+  grid-template-columns: 1fr 1fr 1.7fr;
+  gap: 56px;
+  margin: 0 auto;
+  padding: 48px 72px 56px;
+}
+
+.mega-menu-panel.is-collections .mega-menu-content {
+  grid-template-columns: 1.25fr 1fr 1fr;
+}
+
+.mega-menu-column {
+  min-width: 0;
+}
+
+.mega-menu-column > h2,
+.mega-menu-column-title {
+  min-height: 28px;
+  margin: 0;
+  padding: 0 0 16px;
+  border-bottom: 1px solid #c9c7c1;
+  color: #55534e;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+}
+
+.mega-menu-column-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.mega-menu-column-title h2 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.mega-menu-column-title > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #111;
+  font-size: 10px;
+  letter-spacing: .16em;
+  white-space: nowrap;
+}
+
+.mega-menu-list {
+  display: grid;
+  padding-top: 13px;
+}
+
+.mega-menu-list > a {
+  display: flex;
+  min-height: 41px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  color: #111;
+  font-family: var(--serif, 'Playfair Display', Georgia, serif);
+  font-size: 28px;
+  line-height: 1.1;
+  transition: transform .16s ease, text-decoration-color .16s ease;
+}
+
+.mega-menu-list > a:hover {
+  transform: translateX(4px);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.mega-menu-list > a em {
+  font-weight: 400;
+}
+
+.mega-category-list > a > span {
+  color: #55534e;
+  font-family: 'DM Sans', Arial, sans-serif;
+  font-size: 12px;
+  letter-spacing: .14em;
+}
+
+.mega-product-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding-top: 15px;
+}
+
+.mega-product-card {
+  display: block;
+  min-width: 0;
+  color: #111;
+}
+
+.mega-product-image {
+  display: grid;
+  aspect-ratio: 4 / 5;
+  place-items: center;
+  overflow: hidden;
+  padding: 8%;
+  background: #e5e2dc;
+}
+
+.mega-product-card.is-sand .mega-product-image {
+  background: #dad5ca;
+}
+
+.mega-product-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transition: transform .3s ease;
+}
+
+.mega-product-card:hover .mega-product-image img {
+  transform: scale(1.035);
+}
+
+.mega-product-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 11px;
+  font-size: 11px;
+}
+
+.mega-product-meta > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.mega-product-meta strong {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.mega-product-meta small {
+  color: #55534e;
+  font-size: 9px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.mega-product-meta > span:last-child {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.mega-collection-list {
+  display: grid;
+  padding-top: 10px;
+}
+
+.mega-collection-link {
+  display: grid;
+  min-height: 106px;
+  grid-template-columns: 22px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #c9c7c1;
+  color: #111;
+}
+
+.mega-collection-index {
+  align-self: center;
+  color: #da291c;
+  font-size: 12px;
+  letter-spacing: .1em;
+}
+
+.mega-collection-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.mega-collection-copy > span {
+  font-family: var(--serif, 'Playfair Display', Georgia, serif);
+  font-size: clamp(32px, 3.8vw, 56px);
+  line-height: 1.05;
+}
+
+.mega-collection-copy em {
+  font-weight: 400;
+}
+
+.mega-collection-copy small,
+.mega-collection-link > span:nth-child(2) small {
+  color: #55534e;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.mega-collection-link > svg {
+  transition: transform .16s ease;
+}
+
+.mega-collection-link:hover > svg {
+  transform: translateX(4px);
+}
+
+.mega-feature-column .mega-product-card {
+  margin-top: 15px;
+}
+
+.mega-menu-empty {
+  padding: 20px 0;
+  color: #55534e;
+  font-size: 13px;
+}
+
+.mega-mobile-category-links {
+  display: none;
+}
+
+.drawer-menu-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 17px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: #4a4a4a;
+  cursor: pointer;
+  font-family: var(--serif);
+  font-size: 23px;
+  text-align: left;
+}
+
+.drawer-menu-toggle[aria-expanded="true"] {
+  color: #111;
+}
+
+.drawer-menu-toggle svg {
+  transition: transform .18s ease;
+}
+
+.drawer-menu-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.drawer-menu-submenu {
+  display: grid;
+  padding: 4px 0 14px 14px;
+}
+
+.drawer-menu-submenu > a {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 0;
+  padding: 8px 0;
+  font-family: 'DM Sans', Arial, sans-serif;
+  font-size: 13px;
+}
+
+.drawer-menu-submenu .mega-collection-link {
+  grid-template-columns: 22px minmax(0, 1fr) 18px;
+  min-height: 55px;
+  padding: 6px 0;
+  font-family: 'DM Sans', Arial, sans-serif;
+  font-size: 13px;
+}
+
+.drawer-menu-submenu .mega-collection-link > span:nth-child(2) {
+  display: grid;
+  gap: 3px;
+}
+
+.drawer-menu-submenu .mega-collection-link > span:nth-child(2) small {
+  font-size: 10px;
+}
+
+.drawer-menu-submenu .mega-mobile-category-links {
+  display: grid;
+  padding-top: 6px;
+}
+
+.drawer-menu-submenu .mega-mobile-category-links a {
+  display: flex;
+  justify-content: space-between;
+  color: #55534e;
+  font-family: 'DM Sans', Arial, sans-serif;
+  font-size: 12px;
+}
+
+.drawer-menu-submenu .mega-mobile-category-links span {
+  font-size: 11px;
+}
+
+@keyframes mega-menu-open {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes mega-menu-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media(max-width: 1200px) and (min-width: 901px) {
+  .mega-menu-content {
+    gap: 32px;
+    padding-right: 36px;
+    padding-left: 36px;
+  }
+
+  .mega-menu-list > a {
+    font-size: 24px;
+  }
+}
+
+@media(max-width: 900px) {
+  .header-navigation .header-mega-trigger,
+  .mega-menu-backdrop,
+  .mega-menu-panel {
+    display: none;
+  }
+}
+
+@media(prefers-reduced-motion: reduce) {
+  .header-navigation .header-mega-trigger::after,
+  .header-mega-trigger svg,
+  .mega-product-image img,
+  .mega-collection-link > svg,
+  .drawer-menu-toggle svg {
+    transition: none;
+  }
+
+  .mega-menu-panel,
+  .mega-menu-backdrop {
+    animation: none;
+  }
+}

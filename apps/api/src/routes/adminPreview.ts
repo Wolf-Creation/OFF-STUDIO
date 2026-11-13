@@ -14,7 +14,7 @@ import { Order } from '../models/Order.js'
 import { Product } from '../models/Product.js'
 import { StoreConfig } from '../models/StoreConfig.js'
 import { MediaAsset } from '../models/MediaAsset.js'
-import { canChangeOrderFulfillment, orderQrToken, orderQrTokenHash, orderQrTokenHashForId, paymentStatusForFulfillment } from '../orderQr.js'
+import { canChangeOrderFulfillment, canConfirmCashOnDeliveryPayment, canReverseSyntheticCodPayment, orderQrToken, orderQrTokenHash, orderQrTokenHashForId, paymentStatusForFulfillment } from '../orderQr.js'
 
 const router = Router()
 const imageGenerationLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false })
@@ -368,8 +368,159 @@ router.post('/orders', async (request, response, next) => {
   }
 })
 
-router.patch('/orders/:id/payment', (_request, response) => {
-  response.status(409).json({ error: { code: 'PAYMENT_FOLLOWS_DELIVERY', message: 'Payment is marked paid when fulfillment is delivered. Cancelled and returned orders remain unpaid.' } })
+router.patch('/orders/:id/payment', async (request, response, next) => {
+  try {
+    if (!mongoose.isValidObjectId(request.params.id)) {
+      response.status(400).json({ error: { code: 'INVALID_ORDER_ID', message: 'Order identifier is invalid.' } })
+      return
+    }
+    const current = await Order.findById(request.params.id).select('paymentMethod paymentStatus fulfillmentStatus customerId total').lean()
+    if (!current) {
+      response.status(404).json({ error: { code: 'ORDER_NOT_FOUND', message: 'Order not found.' } })
+      return
+    }
+    if (!canConfirmCashOnDeliveryPayment(current.paymentMethod, current.fulfillmentStatus, current.paymentStatus)) {
+      response.status(409).json({ error: { code: 'COD_PAYMENT_NOT_CONFIRMABLE', message: 'Only delivered, unpaid cash-on-delivery orders can be confirmed as paid.' } })
+      return
+    }
+    const session = await mongoose.startSession()
+    let order: Awaited<ReturnType<typeof Order.findOneAndUpdate>> = null
+    try {
+      await session.withTransaction(async () => {
+        order = await Order.findOneAndUpdate(
+          { _id: request.params.id, paymentMethod: 'cash_on_delivery', fulfillmentStatus: 'delivered', paymentStatus: 'unpaid' },
+          { $set: { paymentStatus: 'paid' } },
+          { new: true, runValidators: true, session },
+        ).select('-qrTokenHash').lean()
+        if (!order) return
+        const customerUpdate = await Customer.updateOne(
+          { _id: current.customerId },
+          { $inc: { orderCount: 1, totalSpent: current.total } },
+          { session },
+        )
+        if (customerUpdate.matchedCount !== 1) throw new Error('The order customer record is missing.')
+      })
+    } finally {
+      await session.endSession()
+    }
+    if (!order) {
+      response.status(409).json({ error: { code: 'ORDER_STATUS_CHANGED', message: 'The order changed while you were confirming payment. Reload and try again.' } })
+      return
+    }
+    response.json({ data: order })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.patch('/orders/:id/payment/reversal', async (request, response, next) => {
+  try {
+    if (process.env.NODE_ENV?.trim().toLowerCase() !== 'staging' || mongoose.connection.name !== 'off_studio_staging') {
+      response.status(403).json({ error: { code: 'SYNTHETIC_PAYMENT_REVERSAL_STAGING_ONLY', message: 'Synthetic payment reversals are only available in the verified staging database.' } })
+      return
+    }
+    if (!mongoose.isValidObjectId(request.params.id)) {
+      response.status(400).json({ error: { code: 'INVALID_ORDER_ID', message: 'Order identifier is invalid.' } })
+      return
+    }
+    const parsed = z.object({ reason: z.string().trim().min(12).max(500) }).strict().safeParse(request.body)
+    if (!parsed.success) {
+      response.status(400).json({ error: { code: 'INVALID_PAYMENT_REVERSAL', message: 'Provide a clear reason for reversing this payment confirmation.' } })
+      return
+    }
+
+    const current = await Order.findById(request.params.id)
+      .select('orderNumber isSynthetic createdBySeed seedRunId paymentMethod paymentStatus fulfillmentStatus customerId total')
+      .lean()
+    if (!current) {
+      response.status(404).json({ error: { code: 'ORDER_NOT_FOUND', message: 'Order not found.' } })
+      return
+    }
+    if (!canReverseSyntheticCodPayment(current)) {
+      response.status(409).json({ error: { code: 'SYNTHETIC_PAYMENT_NOT_REVERSIBLE', message: 'Only delivered, paid, seeded synthetic COD orders can have a payment confirmation reversed.' } })
+      return
+    }
+
+    const changedAt = new Date()
+    const session = await mongoose.startSession()
+    let order: Awaited<ReturnType<typeof Order.findOneAndUpdate>> = null
+    let customerCountersMismatch = false
+    try {
+      await session.withTransaction(async () => {
+        order = await Order.findOneAndUpdate(
+          {
+            _id: request.params.id,
+            orderNumber: current.orderNumber,
+            isSynthetic: true,
+            createdBySeed: true,
+            paymentMethod: 'cash_on_delivery',
+            paymentStatus: 'paid',
+            fulfillmentStatus: 'delivered',
+          },
+          {
+            $set: { paymentStatus: 'unpaid' },
+            $push: {
+              paymentHistory: {
+                action: 'confirmation_reversed',
+                previousStatus: 'paid',
+                paymentStatus: 'unpaid',
+                changedAt,
+                changedBy: request.adminEmail ?? '',
+                reason: parsed.data.reason,
+              },
+            },
+          },
+          { new: true, runValidators: true, session },
+        ).select('-qrTokenHash').lean()
+        if (!order) return
+
+        const customerUpdate = await Customer.updateOne(
+          {
+            _id: current.customerId,
+            isSynthetic: true,
+            createdBySeed: true,
+            seedRunId: current.seedRunId,
+            orderCount: { $gte: 1 },
+            totalSpent: { $gte: current.total },
+          },
+          { $inc: { orderCount: -1, totalSpent: -current.total } },
+          { session },
+        )
+        if (customerUpdate.matchedCount !== 1) {
+          customerCountersMismatch = true
+          throw new Error('Synthetic customer aggregates do not match the confirmed order; payment reversal was rolled back.')
+        }
+      })
+    } finally {
+      await session.endSession()
+    }
+
+    if (customerCountersMismatch) {
+      response.status(409).json({ error: { code: 'SYNTHETIC_CUSTOMER_TOTALS_MISMATCH', message: 'The synthetic customer totals could not be reconciled, so no changes were saved.' } })
+      return
+    }
+    if (!order) {
+      response.status(409).json({ error: { code: 'ORDER_STATUS_CHANGED', message: 'The order changed while its payment confirmation was being reversed. Reload and verify its current status.' } })
+      return
+    }
+    response.json({
+      data: {
+        orderNumber: current.orderNumber,
+        paymentStatus: 'unpaid',
+        fulfillmentStatus: current.fulfillmentStatus,
+        paymentHistoryEntry: {
+          action: 'confirmation_reversed',
+          previousStatus: 'paid',
+          paymentStatus: 'unpaid',
+          changedAt,
+          changedBy: request.adminEmail ?? '',
+          reason: parsed.data.reason,
+        },
+      },
+    })
+  } catch (error) {
+    next(error)
+  }
 })
 
 router.get('/orders/qr/:token', async (request, response, next) => {
@@ -440,7 +591,6 @@ router.patch('/orders/qr/:token/status', async (request, response, next) => {
       response.status(409).json({ error: { code: 'ORDER_STATUS_CHANGED', message: 'The order status changed or the QR code is invalid. Rescan the order and try again.' } })
       return
     }
-    if (fulfillmentStatus === 'delivered' && current.paymentStatus !== 'paid') await Customer.updateOne({ _id: current.customerId }, { $inc: { orderCount: 1, totalSpent: current.total } })
     if (['cancelled', 'returned'].includes(fulfillmentStatus) && current.paymentStatus === 'paid') await Customer.updateOne({ _id: current.customerId }, { $inc: { orderCount: -1, totalSpent: -current.total } })
     if (['cancelled', 'returned'].includes(fulfillmentStatus)) await Promise.all(order.items.map(item => Product.updateOne({ _id: item.productId, 'variants.sku': item.sku }, { $inc: { 'variants.$.stock': item.quantity } })))
     response.json({ data: order })
@@ -590,7 +740,6 @@ router.patch('/orders/:id/fulfillment', async (request, response, next) => {
       response.status(409).json({ error: { code: 'ORDER_STATUS_CHANGED', message: 'The order changed while you were updating it. Reload and try again.' } })
       return
     }
-    if (parsed.data.fulfillmentStatus === 'delivered' && current.paymentStatus !== 'paid') await Customer.updateOne({ _id: current.customerId }, { $inc: { orderCount: 1, totalSpent: current.total } })
     if (['cancelled', 'returned'].includes(parsed.data.fulfillmentStatus) && current.paymentStatus === 'paid') await Customer.updateOne({ _id: current.customerId }, { $inc: { orderCount: -1, totalSpent: -current.total } })
     if (['cancelled', 'returned'].includes(parsed.data.fulfillmentStatus)) await Promise.all(order.items.map(item => Product.updateOne({ _id: item.productId, 'variants.sku': item.sku }, { $inc: { 'variants.$.stock': item.quantity } })))
     response.json({ data: order })

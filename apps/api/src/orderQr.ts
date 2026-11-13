@@ -32,8 +32,26 @@ export function canChangeOrderFulfillment(current: string, next: string) {
   return current === next || orderFulfillmentTransitions[current]?.includes(next) === true
 }
 
-export function paymentStatusForFulfillment(currentPayment: string, nextFulfillment: string): 'unpaid' | 'paid' {
-  if (nextFulfillment === 'delivered') return 'paid'
-  if (nextFulfillment === 'cancelled' || nextFulfillment === 'returned') return 'unpaid'
+export function paymentStatusForFulfillment(currentPayment: string, _nextFulfillment: string): 'unpaid' | 'paid' {
   return currentPayment === 'paid' ? 'paid' : 'unpaid'
+}
+
+export function canConfirmCashOnDeliveryPayment(paymentMethod: string, fulfillmentStatus: string, paymentStatus: string) {
+  return paymentMethod === 'cash_on_delivery' && fulfillmentStatus === 'delivered' && paymentStatus === 'unpaid'
+}
+
+export function canReverseSyntheticCodPayment(order: {
+  orderNumber: string
+  isSynthetic: boolean
+  createdBySeed: boolean
+  paymentMethod: string
+  fulfillmentStatus: string
+  paymentStatus: string
+}) {
+  return order.orderNumber.startsWith('OFF-SYN-')
+    && order.isSynthetic
+    && order.createdBySeed
+    && order.paymentMethod === 'cash_on_delivery'
+    && order.fulfillmentStatus === 'delivered'
+    && order.paymentStatus === 'paid'
 }

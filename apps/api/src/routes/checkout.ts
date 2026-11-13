@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import type { CashOnDeliveryOrderRequest } from '@off/shared-types'
 import { TUNISIA_LOCATIONS } from '@off/shared-types/tunisia-locations'
 import { Router } from 'express'
@@ -8,7 +8,10 @@ import { authenticateOptionalCustomer, CustomerAuthError, resolveClerkCustomer }
 import { Customer } from '../models/Customer.js'
 import { Order } from '../models/Order.js'
 import { Product } from '../models/Product.js'
+import { AnalyticsEvent } from '../models/AnalyticsEvent.js'
+import { CookieConsentLog } from '../models/CookieConsentLog.js'
 import { orderQrTokenHashForId } from '../orderQr.js'
+import { isOnlinePaymentEnabled } from '../runtimeConfig.js'
 
 const router = Router()
 const cashOnDeliverySchema = z.object({
@@ -39,6 +42,7 @@ const cashOnDeliverySchema = z.object({
     quantity: z.number().int().min(1).max(10),
   })).min(1).max(20),
   orderNote: z.string().trim().max(500).optional().default(''),
+  analyticsAttribution: z.object({ visitorId: z.string().uuid(), sessionId: z.string().uuid() }).strict().optional(),
 })
 class CashOnDeliveryError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
@@ -53,24 +57,32 @@ async function releaseReservedStock(items: { productId: mongoose.Types.ObjectId;
 }
 
 async function markOrderPaid(orderId: string, paymentIntentId: string) {
-  const order = await Order.findOneAndUpdate(
-    { _id: orderId, gatewayPaymentStatus: 'pending' },
-    { $set: { gatewayPaymentStatus: 'paid', stripePaymentIntentId: paymentIntentId } },
-    { new: true },
-  )
-  if (order) {
-    await Customer.updateOne(
-      { _id: order.customerId },
-      { $inc: { orderCount: 1, totalSpent: order.total } },
-    )
+  const session = await mongoose.startSession()
+  try {
+    return await session.withTransaction(async () => {
+      const order = await Order.findOneAndUpdate(
+        { _id: orderId, paymentMethod: 'stripe', gatewayPaymentStatus: 'pending', paymentStatus: 'unpaid' },
+        { $set: { gatewayPaymentStatus: 'paid', paymentStatus: 'paid', stripePaymentIntentId: paymentIntentId } },
+        { new: true, session },
+      )
+      if (!order) return
+      const customerUpdate = await Customer.updateOne(
+        { _id: order.customerId },
+        { $inc: { orderCount: 1, totalSpent: order.total } },
+        { session },
+      )
+      if (customerUpdate.matchedCount !== 1) throw new Error('The order customer record is missing.')
+      return order
+    })
+  } finally {
+    await session.endSession()
   }
-  return order
 }
 
 async function cancelPendingOrder(orderId: string) {
   const changedAt = new Date()
   const order = await Order.findOneAndUpdate(
-    { _id: orderId, gatewayPaymentStatus: 'pending' },
+    { _id: orderId, paymentMethod: 'stripe', gatewayPaymentStatus: 'pending', paymentStatus: 'unpaid' },
     { $set: { gatewayPaymentStatus: 'failed', paymentStatus: 'unpaid', fulfillmentStatus: 'cancelled' }, $push: { statusHistory: { status: 'cancelled', previousStatus: 'confirmation', changedAt } } },
     { new: true },
   )
@@ -154,6 +166,60 @@ router.post('/cod', authenticateOptionalCustomer, async (request, response, next
         status: 'active',
       }))
     if (!customer) throw new Error('Unable to resolve the customer record for this order.')
+    let analyticsAttribution: typeof input.analyticsAttribution
+    let analyticsFirstTouch: { source: string; medium?: string; campaign?: string; content?: string; term?: string } | undefined
+    let analyticsLastTouch: typeof analyticsFirstTouch
+    if (input.analyticsAttribution) {
+      const [consent, sessionExists] = await Promise.all([
+        CookieConsentLog.findOne({ visitorId: input.analyticsAttribution.visitorId }).sort({ createdAt: -1 }).select('preferences.analytics').lean(),
+        AnalyticsEvent.exists({ visitorId: input.analyticsAttribution.visitorId, sessionId: input.analyticsAttribution.sessionId }),
+      ])
+      if (consent?.preferences?.analytics && sessionExists) {
+        analyticsAttribution = input.analyticsAttribution
+        const [firstSession, lastEvent] = await Promise.all([
+          AnalyticsEvent.findOne({ visitorId: input.analyticsAttribution.visitorId, type: 'session_start' }).sort({ occurredAt: 1 }).select('sessionId trafficSource referrerHost occurredAt').lean(),
+          AnalyticsEvent.findOne({ visitorId: input.analyticsAttribution.visitorId, type: { $in: ['session_start', 'campaign_visit'] } }).sort({ occurredAt: -1 }).select('type sessionId trafficSource referrerHost utmSource utmMedium utmCampaign utmContent utmTerm occurredAt').lean(),
+        ])
+        const [firstCampaign, lastSession, lastCampaign] = await Promise.all([
+          firstSession
+          ? await AnalyticsEvent.findOne({ visitorId: input.analyticsAttribution.visitorId, sessionId: firstSession.sessionId, type: 'campaign_visit' })
+            .sort({ occurredAt: 1 })
+            .select('utmSource utmMedium utmCampaign utmContent utmTerm')
+            .lean()
+          : AnalyticsEvent.findOne({ visitorId: input.analyticsAttribution.visitorId, type: 'campaign_visit' }).sort({ occurredAt: 1 }).select('utmSource utmMedium utmCampaign utmContent utmTerm referrerHost').lean(),
+          lastEvent?.type === 'session_start'
+            ? Promise.resolve(lastEvent)
+            : lastEvent
+              ? AnalyticsEvent.findOne({ visitorId: input.analyticsAttribution.visitorId, sessionId: lastEvent.sessionId, type: 'session_start' }).sort({ occurredAt: -1 }).select('sessionId trafficSource referrerHost occurredAt').lean()
+              : Promise.resolve(null),
+          lastEvent?.type === 'campaign_visit'
+            ? Promise.resolve(lastEvent)
+            : lastEvent
+              ? AnalyticsEvent.findOne({ visitorId: input.analyticsAttribution.visitorId, sessionId: lastEvent.sessionId, type: 'campaign_visit' }).sort({ occurredAt: -1 }).select('sessionId trafficSource referrerHost utmSource utmMedium utmCampaign utmContent utmTerm occurredAt').lean()
+              : Promise.resolve(null),
+        ])
+        const toTouch = (sessionEvent: typeof firstSession, campaignEvent: typeof firstCampaign | typeof lastEvent) => sessionEvent || campaignEvent ? {
+          source: campaignEvent?.utmSource || sessionEvent?.trafficSource || campaignEvent?.referrerHost || sessionEvent?.referrerHost || 'Direct',
+          ...((campaignEvent?.utmMedium) ? { medium: campaignEvent.utmMedium } : {}),
+          ...((campaignEvent?.utmCampaign) ? { campaign: campaignEvent.utmCampaign } : {}),
+          ...((campaignEvent?.utmContent) ? { content: campaignEvent.utmContent } : {}),
+          ...((campaignEvent?.utmTerm) ? { term: campaignEvent.utmTerm } : {}),
+        } : undefined
+        analyticsFirstTouch = toTouch(firstSession, firstCampaign)
+        analyticsLastTouch = toTouch(lastSession, lastCampaign)
+      }
+    }
+    if (analyticsAttribution) {
+      const currentConsent = await CookieConsentLog.findOne({ visitorId: analyticsAttribution.visitorId })
+        .sort({ createdAt: -1 })
+        .select('preferences.analytics')
+        .lean()
+      if (!currentConsent?.preferences?.analytics) {
+        analyticsAttribution = undefined
+        analyticsFirstTouch = undefined
+        analyticsLastTouch = undefined
+      }
+    }
     const total = items.reduce((sum, item) => sum + Math.round(item.unitPrice * 100) * item.quantity, 0) / 100
     const placedAt = new Date()
     const suffix = randomBytes(3).toString('hex').toUpperCase()
@@ -175,11 +241,37 @@ router.post('/cod', authenticateOptionalCustomer, async (request, response, next
       gatewayPaymentStatus: 'pending',
       paymentMethod: 'cash_on_delivery',
       fulfillmentStatus: 'confirmation',
+      ...(analyticsAttribution ? { analyticsVisitorId: analyticsAttribution.visitorId, analyticsSessionId: analyticsAttribution.sessionId } : {}),
+      ...(analyticsFirstTouch ? { analyticsFirstTouch } : {}),
+      ...(analyticsLastTouch ? { analyticsLastTouch } : {}),
       statusHistory: [{ status: 'confirmation', changedAt: placedAt }],
       source: 'online',
       placedAt,
     })
     orderId = order._id
+    if (analyticsAttribution) {
+      try {
+        await AnalyticsEvent.create([
+          {
+            eventId: randomUUID(),
+            type: 'checkout_step',
+            checkoutStep: 'order_confirmed',
+            visitorId: analyticsAttribution.visitorId,
+            sessionId: analyticsAttribution.sessionId,
+            page: '/checkout',
+          },
+          {
+            eventId: randomUUID(),
+            type: 'purchase',
+            visitorId: analyticsAttribution.visitorId,
+            sessionId: analyticsAttribution.sessionId,
+            page: '/checkout',
+          },
+        ])
+      } catch (error) {
+        console.warn('Unable to record confirmed checkout analytics:', error instanceof Error ? error.name : 'Unknown error')
+      }
+    }
     response.status(201).json({ data: { orderNumber: order.orderNumber, total, currency: 'TND' } })
   } catch (error) {
     try {
@@ -203,14 +295,20 @@ router.post('/cod', authenticateOptionalCustomer, async (request, response, next
 router.post('/', (_request, response) => {
   response.status(503).json({
     error: {
-      code: 'TND_PAYMENT_NOT_CONFIGURED',
-      message: 'Online payment in TND is not available yet. Please contact the store to place your order.',
+      code: isOnlinePaymentEnabled() ? 'TND_PAYMENT_NOT_CONFIGURED' : 'ONLINE_PAYMENT_DISABLED',
+      message: isOnlinePaymentEnabled()
+        ? 'Online payment in TND is not available yet. Please contact the store to place your order.'
+        : 'Online payment is currently disabled. Choose cash on delivery.',
     },
   })
 })
 
 router.get('/session/:sessionId', async (request, response, next) => {
   try {
+    if (!isOnlinePaymentEnabled()) {
+      response.status(503).json({ error: { code: 'ONLINE_PAYMENT_DISABLED', message: 'Online payment is currently disabled.' } })
+      return
+    }
     if (!/^cs_(test|live)_[A-Za-z0-9]+$/.test(request.params.sessionId)) {
       response.status(400).json({ error: { code: 'INVALID_SESSION', message: 'Checkout session is invalid.' } })
       return

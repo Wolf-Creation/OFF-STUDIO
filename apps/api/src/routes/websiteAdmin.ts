@@ -11,6 +11,7 @@ import { ContentRevision } from '../models/ContentRevision.js'
 import { MediaAsset } from '../models/MediaAsset.js'
 import { WebsiteConfig } from '../models/WebsiteConfig.js'
 import { WebsitePage } from '../models/WebsitePage.js'
+import { CookieConsentLog } from '../models/CookieConsentLog.js'
 import { Product } from '../models/Product.js'
 import { Collection } from '../models/Collection.js'
 import { Category } from '../models/Category.js'
@@ -103,6 +104,32 @@ const defaultSections = (slug: string) => slug === 'home' ? [
 ] : []
 
 router.use(authenticateAdmin)
+
+router.get('/privacy/consents', async (request, response, next) => {
+  try {
+    const query = z.object({
+      page: z.coerce.number().int().min(1).default(1),
+      limit: z.coerce.number().int().min(1).max(100).default(50),
+    }).safeParse(request.query)
+    if (!query.success) {
+      response.status(400).json({ error: { code: 'INVALID_PAGINATION', message: 'Consent log pagination is invalid.' } })
+      return
+    }
+    const { page, limit } = query.data
+    const [logs, total, grouped] = await Promise.all([
+      CookieConsentLog.find().sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).select('visitorId preferences action policyVersion createdAt').lean(),
+      CookieConsentLog.countDocuments(),
+      CookieConsentLog.aggregate<{ _id: string; count: number }>([{ $group: { _id: '$action', count: { $sum: 1 } } }]),
+    ])
+    const stats = { accept_all: 0, reject_all: 0, custom: 0 }
+    for (const entry of grouped) {
+      if (entry._id in stats) stats[entry._id as keyof typeof stats] = entry.count
+    }
+    response.json({ data: { logs, total, page, limit, stats } })
+  } catch (error) {
+    next(error)
+  }
+})
 
 async function ensurePages() {
   await Promise.all(pageNames.map(([slug, name, pageType, protectedPage]) => WebsitePage.updateOne(

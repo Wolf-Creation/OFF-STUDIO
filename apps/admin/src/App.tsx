@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowDown, ArrowUp, Boxes, CalendarClock, Camera, CameraOff, Check, ChevronLeft, ChevronRight, ClipboardList, Eye, FileText, Image, LayoutDashboard, Layers3, LogOut, Menu, MoreHorizontal, Package, PanelsTopLeft, Plus, Printer, QrCode, RotateCcw, Save, Search, Settings, SlidersHorizontal, Tag, Trash2, UserRound, Users, X, type LucideIcon } from 'lucide-react'
-import { BrowserQRCodeReader } from '@zxing/browser'
-import QRCode from 'qrcode'
+import { ArrowDown, ArrowUp, Boxes, CalendarClock, Camera, CameraOff, Check, ChevronLeft, ChevronRight, ClipboardList, Cookie, Eye, FileText, Heart, Image, LayoutDashboard, Layers3, LogOut, Menu, MoreHorizontal, Package, PanelsTopLeft, Plus, Printer, QrCode, RotateCcw, Save, Search, Settings, SlidersHorizontal, Tag, Trash2, UserRound, Users, X, BarChart3, ShoppingCart, Megaphone, UserRoundSearch, FileDown, type LucideIcon } from 'lucide-react'
 import type { ApiCategory, ApiCollection, ApiCustomer, ApiOrder, ApiProduct, ApiResponse, ApiShippingAddress, CategoryWriteInput, CollectionWriteInput, DashboardData, ManualOrderRequest, ProductVariantWriteInput, ProductWriteInput, StoreSettings } from '@off/shared-types'
 import { TUNISIA_LOCATIONS } from '@off/shared-types/tunisia-locations'
 import { removePlainBackground } from './backgroundRemoval'
@@ -34,8 +32,9 @@ const emptyProductInput = (category = ''): ProductWriteInput => ({
 const adminTokenKey = 'off-admin-token'
 const navGroups: { label: string; links: [string, string, LucideIcon][] }[] = [
   { label: 'OVERVIEW', links: [['Dashboard', '/dashboard', LayoutDashboard]] },
+  { label: 'ANALYTICS & INTELLIGENCE', links: [['Overview', '/analytics/overview', BarChart3], ['Website', '/analytics/website', Eye], ['E-commerce', '/analytics/ecommerce', ShoppingCart], ['Products', '/analytics/products', Package], ['Wishlist', '/analytics/wishlist', Heart], ['Collections', '/analytics/collections', Layers3], ['Marketing', '/analytics/marketing', Megaphone], ['Customers', '/analytics/customers', UserRoundSearch], ['Reports & Intelligence', '/analytics/reports', FileDown]] },
   { label: 'COMMERCE', links: [['Orders', '/orders', ClipboardList], ['QR Orders', '/qr-orders', QrCode], ['Products', '/products', Package], ['Customers', '/customers', Users], ['Categories', '/categories', Tag], ['Collections', '/collections', Layers3]] },
-  { label: 'MANAGE', links: [['Inventory', '/inventory', Boxes], ['Content', '/content', FileText], ['Settings', '/settings', Settings]] },
+  { label: 'MANAGE', links: [['Inventory', '/inventory', Boxes], ['Content', '/content', FileText], ['Settings', '/settings', Settings], ['Privacy & Cookies', '/settings/privacy-cookies', Cookie]] },
   { label: 'WEBSITE', links: [['Website', '/website', PanelsTopLeft], ['Pages', '/website/pages', FileText], ['Homepage Builder', '/website/homepage', PanelsTopLeft], ['Navigation & Footer', '/website/navigation', Settings], ['Website Settings', '/website/settings', Settings], ['Media Library', '/website/media', Image], ['Scheduled Publications', '/website/scheduled', CalendarClock]] },
 ] as const
 const formatTnd = (amount: number) => `${new Intl.NumberFormat('fr-TN', { maximumFractionDigits: 3 }).format(amount)} TND`
@@ -81,14 +80,14 @@ function Sidebar({ onSignOut }: { onSignOut: () => void }) {
     {mobileOpen && <button className="mobile-overlay" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <aside className={`admin-sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="sidebar-top"><Brand /><button className="sidebar-mobile-close" aria-label="Close navigation" onClick={() => setMobileOpen(false)}><X size={16} /></button><span>STUDIO / LOS ANGELES</span></div>
-      <nav>{navGroups.map(group => <div className="nav-group" key={group.label}><p>{group.label}</p>{group.links.map(([label, path, Icon]) => <NavLink key={label} to={path} className={({ isActive }) => `${isActive ? 'active' : ''} ${location.pathname === '/' && path === '/dashboard' ? 'active' : ''}`}><Icon size={15} strokeWidth={1.6} /><span>{label}</span></NavLink>)}</div>)}</nav>
+      <nav>{navGroups.map(group => <div className="nav-group" key={group.label}><p>{group.label}</p>{group.links.map(([label, path, Icon]) => <NavLink key={label} to={path} end={path === '/settings'} className={({ isActive }) => `${isActive ? 'active' : ''} ${location.pathname === '/' && path === '/dashboard' ? 'active' : ''}`}><Icon size={15} strokeWidth={1.6} /><span>{label}</span></NavLink>)}</div>)}</nav>
       <div className="sidebar-bottom"><span className="admin-avatar">O</span><div><b>OFF Studio</b><small>Administrator</small></div><button aria-label="Sign out" onClick={onSignOut}><LogOut size={14} /></button></div>
     </aside>
   </>
 }
 
 function AdminLayout({ onSignOut }: { onSignOut: () => void }) {
-  return <div className="admin-app"><Sidebar onSignOut={onSignOut} /><main className="admin-main"><Routes><Route path="/" element={<Navigate to="/dashboard" replace />} /><Route path="/dashboard" element={<Dashboard />} /><Route path="/products" element={<Products />} /><Route path="/orders" element={<Orders />} /><Route path="/qr-orders" element={<QrOrders />} /><Route path="/qr-orders/:token" element={<QrOrders />} /><Route path="/customers" element={<Customers />} /><Route path="/categories" element={<Categories />} /><Route path="/collections" element={<Collections />} /><Route path="/inventory" element={<Inventory />} /><Route path="/content" element={<StoreManagement section="content" />} /><Route path="/settings" element={<StoreManagement section="settings" />} /><Route path="/website" element={<WebsiteOverview />} /><Route path="/website/pages" element={<WebsitePages />} /><Route path="/website/pages/:pageId/editor" element={<WebsiteEditor />} /><Route path="/website/homepage" element={<WebsiteEditor homepage />} /><Route path="/website/navigation" element={<WebsiteNavigation />} /><Route path="/website/settings" element={<WebsiteGlobalSettings />} /><Route path="/website/media" element={<WebsiteMedia />} /><Route path="/website/merchandising" element={<WebsiteMerchandising />} /><Route path="/website/scheduled" element={<WebsiteScheduled />} /><Route path="*" element={<Dashboard />} /></Routes></main></div>
+  return <div className="admin-app"><Sidebar onSignOut={onSignOut} /><main className="admin-main"><Routes><Route path="/" element={<Navigate to="/dashboard" replace />} /><Route path="/dashboard" element={<Dashboard />} /><Route path="/analytics/overview" element={<AnalyticsDashboard section="overview" />} /><Route path="/analytics/website" element={<AnalyticsDashboard section="website" />} /><Route path="/analytics/ecommerce" element={<AnalyticsDashboard section="ecommerce" />} /><Route path="/analytics/products" element={<AnalyticsDashboard section="products" />} /><Route path="/analytics/wishlist" element={<AnalyticsDashboard section="wishlist" />} /><Route path="/analytics/collections" element={<AnalyticsDashboard section="collections" />} /><Route path="/analytics/marketing" element={<AnalyticsDashboard section="marketing" />} /><Route path="/analytics/customers" element={<AnalyticsDashboard section="customers" />} /><Route path="/analytics/reports" element={<AnalyticsDashboard section="reports" />} /><Route path="/products" element={<Products />} /><Route path="/orders" element={<Orders />} /><Route path="/qr-orders" element={<QrOrders />} /><Route path="/qr-orders/:token" element={<QrOrders />} /><Route path="/customers" element={<Customers />} /><Route path="/categories" element={<Categories />} /><Route path="/collections" element={<Collections />} /><Route path="/inventory" element={<Inventory />} /><Route path="/content" element={<StoreManagement section="content" />} /><Route path="/settings" element={<StoreManagement section="settings" />} /><Route path="/settings/privacy-cookies" element={<CookieConsentDashboard />} /><Route path="/website" element={<WebsiteOverview />} /><Route path="/website/pages" element={<WebsitePages />} /><Route path="/website/pages/:pageId/editor" element={<WebsiteEditor />} /><Route path="/website/homepage" element={<WebsiteEditor homepage />} /><Route path="/website/navigation" element={<WebsiteNavigation />} /><Route path="/website/settings" element={<WebsiteGlobalSettings />} /><Route path="/website/media" element={<WebsiteMedia />} /><Route path="/website/merchandising" element={<WebsiteMerchandising />} /><Route path="/website/scheduled" element={<WebsiteScheduled />} /><Route path="*" element={<Dashboard />} /></Routes></main></div>
 }
 
 function AdminSignIn({ onSignedIn }: { onSignedIn: () => void }) {
@@ -185,7 +184,14 @@ function QrOrders() {
   const lastScanRef = useRef('')
   const currentToken = routeToken || searchParams.get('token') || ''
 
-  useEffect(() => { void BrowserQRCodeReader.listVideoInputDevices().then(devices => setCameras(devices)).catch(() => setCameras([])) }, [])
+  useEffect(() => {
+    let cancelled = false
+    void import('@zxing/browser')
+      .then(({ BrowserQRCodeReader }) => BrowserQRCodeReader.listVideoInputDevices())
+      .then(devices => { if (!cancelled) setCameras(devices) })
+      .catch(() => { if (!cancelled) setCameras([]) })
+    return () => { cancelled = true }
+  }, [])
   const loadToken = async (value: string) => {
     setLoading(true); setError(''); setNotice('')
     try {
@@ -220,6 +226,7 @@ function QrOrders() {
   const startScanner = async () => {
     setError(''); setNotice(''); lastScanRef.current = ''; setScanning(true)
     try {
+      const { BrowserQRCodeReader } = await import('@zxing/browser')
       const devices = await BrowserQRCodeReader.listVideoInputDevices()
       setCameras(devices)
       if (!devices.length) throw new Error('No camera was found. Use the order number field below.')
@@ -254,6 +261,16 @@ function QrOrders() {
   }
   const order = orderResult?.order
   const address = order?.shippingAddress
+  const confirmCodPayment = async () => {
+    if (!orderResult || !order || !window.confirm(`Confirm that cash was collected for ${order.orderNumber}?`)) return
+    setUpdating(true); setError(''); setNotice('')
+    try {
+      const updated = await apiRequest<ApiOrder>(`/admin-preview/orders/${order._id}/payment`, { method: 'PATCH' })
+      setOrderResult({ ...orderResult, order: updated })
+      setNotice(`Payment confirmed for ${updated.orderNumber}.`)
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to confirm cash-on-delivery payment.') }
+    finally { setUpdating(false) }
+  }
   return <div className="admin-content qr-orders-content">
     <PageHeader eyebrow="COMMERCE / ORDER OPERATIONS" title="QR Orders" action={order && <Status value={order.fulfillmentStatus} />} />
     {error && <div className="admin-alert" role="alert">{error}</div>}{notice && <div className="admin-success" role="status">{notice}</div>}
@@ -271,7 +288,7 @@ function QrOrders() {
         <div className="qr-order-summary"><section><h3>Customer</h3><b>{order.customerName}</b><a href={`mailto:${order.customerEmail}`}>{order.customerEmail}</a><a href={address?.phoneNumber ? `tel:${address.phoneNumber}` : undefined}>{address?.phoneNumber || 'Phone not provided'}</a></section><section><h3>Shipping address</h3><p>{address ? <>{address.fullName && <>{address.fullName}<br /></>}{address.line1}{address.line2 && `, ${address.line2}`}<br />{address.delegation || address.city}{address.governorate && `, ${address.governorate}`}<br />{address.postalCode && `${address.postalCode} · `}{address.country === 'TN' ? 'Tunisia' : address.country}</> : 'No address on this order.'}</p></section></div>
         <div className="qr-detail-block"><div className="qr-detail-block-title"><h3>Items</h3><span>{order.items.reduce((sum, item) => sum + item.quantity, 0)} total</span></div>{order.items.map((item, index) => <article className="qr-order-item" key={`${item.sku}-${index}`}><img src={item.image || undefined} alt="" /><div><b>{item.name}</b><span>{item.color} / {item.size} · SKU {item.sku}</span></div><span>× {item.quantity}</span><strong>{formatTnd(item.unitPrice * item.quantity)}</strong></article>)}</div>
         <div className="qr-order-facts"><div><span>PAYMENT</span><b>{(order.paymentMethod ?? 'stripe').replace('_', ' ')} · {fulfillmentStatusLabels[order.paymentStatus] ?? order.paymentStatus}</b></div><div><span>TRACKING</span><b>{order.trackingNumber || 'Not provided'}</b></div><div><span>ORDER TOTAL</span><b>{formatTnd(order.total)}</b></div></div>
-        <section className="qr-status-section"><div><h3>Changer le statut</h3><p>Chaque changement est confirmé et ajouté à l’historique.</p></div><div className="qr-status-actions">{(nextOrderStatuses[order.fulfillmentStatus] ?? []).map(status => <button key={status} className="admin-button primary" disabled={updating} onClick={() => void updateStatus(status)}>{updating ? 'Saving…' : <><Check size={14} /> {fulfillmentStatusLabels[status]}</>}</button>)}</div></section>
+        <section className="qr-status-section"><div><h3>Changer le statut</h3><p>Chaque changement est confirmé et ajouté à l’historique. Delivery does not confirm payment.</p></div><div className="qr-status-actions">{(nextOrderStatuses[order.fulfillmentStatus] ?? []).map(status => <button key={status} className="admin-button primary" disabled={updating} onClick={() => void updateStatus(status)}>{updating ? 'Saving…' : <><Check size={14} /> {fulfillmentStatusLabels[status]}</>}</button>)}{order.paymentMethod === 'cash_on_delivery' && order.fulfillmentStatus === 'delivered' && order.paymentStatus === 'unpaid' && <button className="admin-button primary" disabled={updating} onClick={() => void confirmCodPayment()}>{updating ? 'Saving…' : 'Confirm COD payment collected'}</button>}</div></section>
         <section className="qr-history"><h3>Status history</h3>{order.statusHistory?.length ? <ol>{[...order.statusHistory].reverse().map((entry, index) => <li key={`${entry.changedAt}-${index}`}><span className="qr-history-dot" /><div><b>{entry.previousStatus ? `${entry.previousStatus} → ${entry.status}` : entry.status}</b><span>{new Date(entry.changedAt).toLocaleString()}{entry.changedBy ? ` · ${entry.changedBy}` : ''}</span></div></li>)}</ol> : <p>No status changes recorded yet.</p>}</section>
       </> : <div className="qr-empty-state"><QrCode size={28} /><h2>Ready to scan</h2><p>Start the camera or enter an order number to view its details and manage fulfillment.</p></div>}</section>
     </div>
@@ -293,10 +310,11 @@ function TunisianAddressFields({ address, onAddressChange }: { address: ApiShipp
 }
 
 function Products() {
+  const [searchParams] = useSearchParams()
   const [data, setData] = useState<RowProduct[]>([])
   const [records, setRecords] = useState<ApiProduct[]>([])
   const [categories, setCategories] = useState<ApiCategory[]>([])
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(() => searchParams.get('q') ?? '')
   const [category, setCategory] = useState('All categories')
   const [status, setStatus] = useState('All status')
   const [modal, setModal] = useState(false)
@@ -499,7 +517,7 @@ function Orders() {
   const [orderActionId, setOrderActionId] = useState('')
   const [notice, setNotice] = useState('')
   const [reload, setReload] = useState(0)
-  useEffect(() => { let cancelled = false; setShippingLabelQr(''); if (!shippingLabel?.qrToken) return; const labelUrl = `${window.location.origin}/qr-orders/${shippingLabel.qrToken}`; QRCode.toDataURL(labelUrl, { errorCorrectionLevel: 'M', margin: 1, width: 256 }).then(dataUrl => { if (!cancelled) setShippingLabelQr(dataUrl) }).catch(() => { if (!cancelled) setShippingLabelError('Unable to generate the order QR code.') }); return () => { cancelled = true } }, [shippingLabel?.qrToken])
+  useEffect(() => { let cancelled = false; setShippingLabelQr(''); if (!shippingLabel?.qrToken) return; const labelUrl = `${window.location.origin}/qr-orders/${shippingLabel.qrToken}`; void import('qrcode').then(({ default: QRCode }) => QRCode.toDataURL(labelUrl, { errorCorrectionLevel: 'M', margin: 1, width: 256 })).then(dataUrl => { if (!cancelled) setShippingLabelQr(dataUrl) }).catch(() => { if (!cancelled) setShippingLabelError('Unable to generate the order QR code.') }); return () => { cancelled = true } }, [shippingLabel?.qrToken])
   const emptyForm = (): ManualOrderForm => ({
     name: '',
     email: '',
@@ -587,6 +605,18 @@ function Orders() {
       setError(cause instanceof Error ? cause.message : 'Unable to update order fulfillment.')
     }
   }
+  const confirmCodPayment = async (order: ApiOrder) => {
+    if (!window.confirm(`Confirm that cash was collected for ${order.orderNumber}?`)) return
+    setOrderActionId(order._id); setError(''); setNotice('')
+    try {
+      const updated = await apiRequest<ApiOrder>(`/admin-preview/orders/${order._id}/payment`, { method: 'PATCH' })
+      setRows(current => current.map(item => item._id === order._id ? updated : item))
+      setSelectedOrder(current => current?._id === order._id ? updated : current)
+      setNotice(`Payment confirmed for ${order.orderNumber}.`)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to confirm cash-on-delivery payment.')
+    } finally { setOrderActionId('') }
+  }
   const deleteOrder = async (order: ApiOrder) => {
     if (!window.confirm(`Supprimer définitivement la commande ${order.orderNumber} ? Cette action ne peut pas être annulée.`)) return
     setOrderActionId(order._id); setError(''); setNotice('')
@@ -669,7 +699,7 @@ function Orders() {
           }}><Plus size={13} /> Add item</button>
         </fieldset>
         <p className="manual-order-summary">Order total <strong>{formatTnd(orderTotal)}</strong></p>
-        <p className="modal-note">A new order starts in confirmation with payment marked unpaid. Payment changes to paid when fulfillment is marked delivered.</p>
+        <p className="modal-note">A new order starts in confirmation with payment marked unpaid. Delivery does not confirm payment; record collected cash after delivery.</p>
         <button className="admin-button primary" type="submit" disabled={saving || !form.items.length || !form.shippingAddress.governorate || !form.shippingAddress.delegation || form.items.some(item => !availableVariants.some(entry => entry.product._id === item.productId && entry.variant.sku === item.sku && entry.variant.stock >= item.quantity))}>{saving ? 'Creating order…' : 'Create order'}</button>
       </form>
     </div>}
@@ -682,6 +712,7 @@ function Orders() {
         </header>
         <section className="order-detail-customer"><span className="order-detail-icon"><UserRound size={17} /></span><div><b>{selectedOrder.customerName}</b><span>{selectedOrder.customerEmail && !selectedOrder.customerEmail.endsWith('@no-email.invalid') ? selectedOrder.customerEmail : 'Email not provided'}</span></div></section>
         <section className="order-detail-statuses"><div><span>PAYMENT</span><p><Status value={selectedOrder.paymentStatus} />{selectedOrder.paymentMethod === 'cash_on_delivery' && <small>Cash on delivery</small>}</p></div><div><span>FULFILLMENT</span><p><Status value={selectedOrder.fulfillmentStatus} /></p></div></section>
+        {selectedOrder.paymentMethod === 'cash_on_delivery' && selectedOrder.fulfillmentStatus === 'delivered' && selectedOrder.paymentStatus === 'unpaid' && <section className="order-detail-section"><button className="admin-button primary" type="button" disabled={orderActionId === selectedOrder._id} onClick={() => void confirmCodPayment(selectedOrder)}>{orderActionId === selectedOrder._id ? 'Confirming…' : 'Confirm COD payment collected'}</button></section>}
         <section className="order-detail-section"><div className="order-detail-section-heading"><h3>Items</h3><span>{selectedOrder.items.reduce((sum, item) => sum + item.quantity, 0)} item{selectedOrder.items.reduce((sum, item) => sum + item.quantity, 0) === 1 ? '' : 's'}</span></div><div className="order-detail-items"><div className="order-detail-items-head"><span>IMAGE</span><span>PRODUCT</span><span>SKU</span><span>QTY</span><span>PRICE</span></div>{selectedOrder.items.map(item => <article className="order-detail-item" key={`${item.sku}-${item.size}`}><a className="order-detail-product-image" href={`${import.meta.env.VITE_STOREFRONT_URL || 'http://localhost:5173'}${products.find(entry => entry._id === item.productId) ? `/product/${products.find(entry => entry._id === item.productId)?.slug}` : '/shop'}`} target="_blank" rel="noreferrer" aria-label={`Open ${item.name} in a new tab`}><img src={item.image || products.find(entry => entry._id === item.productId)?.images?.[0]?.url || ''} alt={item.name} /></a><div className="order-detail-product"><a className="order-detail-product-name" href={`${import.meta.env.VITE_STOREFRONT_URL || 'http://localhost:5173'}${products.find(entry => entry._id === item.productId) ? `/product/${products.find(entry => entry._id === item.productId)?.slug}` : '/shop'}`} target="_blank" rel="noreferrer">{item.name}</a><span>{item.color} / {item.size}</span></div><span>{item.sku}</span><span>{item.quantity}</span><b>{formatTnd(item.unitPrice * item.quantity)}</b></article>)}</div></section>
         <section className="order-detail-section order-detail-note"><h3>Order note</h3>{selectedOrder.orderNote?.trim() ? <p>{selectedOrder.orderNote}</p> : <p className="order-detail-empty">No note was added to this order.</p>}</section>
         <section className="order-detail-section order-detail-shipping"><h3>Shipping address</h3>{selectedOrder.shippingAddress ? <address>{selectedOrder.shippingAddress.line1}{selectedOrder.shippingAddress.line2 && <>, {selectedOrder.shippingAddress.line2}</>}<br />{selectedOrder.shippingAddress.governorate ? <>{selectedOrder.shippingAddress.delegation}, {selectedOrder.shippingAddress.governorate}</> : selectedOrder.shippingAddress.city}<br />{selectedOrder.shippingAddress.postalCode && <>{selectedOrder.shippingAddress.postalCode}, </>}{selectedOrder.shippingAddress.country === 'TN' ? 'Tunisia' : selectedOrder.shippingAddress.country}{selectedOrder.shippingAddress.phoneNumber && <span>Phone: {selectedOrder.shippingAddress.phoneNumber}</span>}</address> : <p className="order-detail-empty">No shipping address provided.</p>}</section>
@@ -919,6 +950,522 @@ function StoreManagement({ section }: { section: 'content' | 'settings' }) {
   const advertisementMessages = data ? (data.advertisementMessages?.length ? data.advertisementMessages : [data.announcement]) : []
   if (loading) return <div className="admin-content"><PageHeader title={title} /><section className="panel table-empty">Loading configuration…</section></div>
   return <div className="admin-content"><PageHeader eyebrow="STORE MANAGEMENT" title={title} />{error && <div className="admin-alert" role="alert">{error}</div>}{saved && <div className="admin-success" role="status">Changes saved.</div>}{data && <form className="panel management-form" onSubmit={submit}>{section === 'content' ? <><h2>Homepage messaging</h2><label>Fallback announcement (used if the advertisement bar has no messages)<input value={data.announcement} onChange={event => update('announcement', event.target.value)} maxLength={160} required /></label><label>Hero eyebrow<input value={data.heroEyebrow} onChange={event => update('heroEyebrow', event.target.value)} maxLength={100} required /></label><label>Hero heading<input value={data.heroTitle} onChange={event => update('heroTitle', event.target.value)} maxLength={120} required /></label><label>Hero description<input value={data.heroSubtitle} onChange={event => update('heroSubtitle', event.target.value)} maxLength={240} required /></label><label>Campaign eyebrow<input value={data.campaignEyebrow} onChange={event => update('campaignEyebrow', event.target.value)} maxLength={100} required /></label><label>Campaign heading<input value={data.campaignTitle} onChange={event => update('campaignTitle', event.target.value)} maxLength={120} required /></label></> : <><h2>Store preferences</h2><label>Free-shipping threshold (TND)<input type="number" min="0" max="100000" step="1" value={data.freeShippingThreshold} onChange={event => update('freeShippingThreshold', Number(event.target.value))} required /></label><label>Customer support email<input type="email" value={data.supportEmail} onChange={event => update('supportEmail', event.target.value)} placeholder="support@example.com" /></label><h2>Advertisement bar</h2><p className="admin-note">Messages scroll continuously across the announcement bar, separated by a vertical line. Add up to 10 messages.</p>{advertisementMessages.map((message, index) => <div className="advertisement-message-row" key={index}><label>Message {index + 1}<input value={message} onChange={event => { const next = [...advertisementMessages]; next[index] = event.target.value; update('advertisementMessages', next) }} maxLength={160} /></label><button className="admin-button compact" type="button" disabled={advertisementMessages.length <= 1} onClick={() => update('advertisementMessages', advertisementMessages.filter((_, messageIndex) => messageIndex !== index))}>Remove</button></div>)}<button className="admin-button" type="button" disabled={advertisementMessages.length >= 10} onClick={() => update('advertisementMessages', [...advertisementMessages, ''])}>Add message</button><h2>Shipping label sender</h2><label>Sender name<input value={data.shippingSenderName ?? ''} onChange={event => update('shippingSenderName', event.target.value)} maxLength={120} /></label><label>Sender phone<input value={data.shippingSenderPhone ?? ''} onChange={event => update('shippingSenderPhone', event.target.value)} maxLength={32} /></label><label>Sender address<textarea value={data.shippingSenderAddress ?? ''} onChange={event => update('shippingSenderAddress', event.target.value)} maxLength={300} rows={3} /></label><p className="admin-note">Shipping is currently complimentary on all checkout orders; this threshold controls storefront messaging only.</p></>}<button className="admin-button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></form>}</div>
+}
+
+type AnalyticsProductRow = {
+  product: { id: string; name: string; slug: string; image: string } | null
+  views?: number
+  additions?: number
+  purchases?: number
+  revenue?: number
+  visitors?: string[]
+}
+type AnalyticsOverviewData = {
+  period: { days: number; from: string; to: string; month?: string }
+  metrics: {
+    visitors: number; sessions: number; pageViews: number; orders: number; revenue: number
+    conversionRate: number | null; averageOrderValue: number | null; cartAdds: number
+    checkoutStarts: number; checkoutAbandonedSessions: number; checkoutAbandonmentRate: number | null
+    activeVisitors: number; returningVisitorRate: number | null
+  }
+  comparison: { visitors: number; sessions: number; pageViews: number; orders: number; revenue: number }
+  daily: { date: string; visitors: number; sessions: number; pageViews: number; orders: number; revenue: number }[]
+  topViewed: AnalyticsProductRow[]
+  topWishlisted: AnalyticsProductRow[]
+  topAddedToCart: AnalyticsProductRow[]
+  topPurchased: AnalyticsProductRow[]
+  topCollections: { _id: string; views: number; visitors: number; collection: { id: string; name: string; slug: string; image: string } | null }[]
+  sources: { _id: string; sessions: number; visitors: number }[]
+  pages: { _id: string; views: number; visitors: number; sessions: number }[]
+  funnel: { stage: string; visitors: number }[]
+  attribution: {
+    firstTouch: { _id: string; orders: number; revenue: number }[]
+    lastTouch: { _id: string; orders: number; revenue: number }[]
+  }
+  ctas: { _id: string; label?: string; location?: string; impressions: number; clicks: number; ctr: number | null }[]
+  demand: {
+    sizes: { _id: string; unitsSold: number }[]
+    colors: { _id: string; unitsSold: number }[]
+    sizeStock: { _id: string; unitsInStock: number }[]
+    colorStock: { _id: string; unitsInStock: number }[]
+  }
+  advanced: {
+    products: {
+      productId: string
+      product: { id: string; name: string; slug: string; image: string } | null
+      views: number
+      uniqueViewers: number
+      wishlistAdditions: number
+      cartAddEvents: number
+      wishlistVisitors: number
+      wishlistAfterViewVisitorCount: number
+      cartVisitors: number
+      purchaseVisitors: number
+      unitsPurchased: number
+      viewToWishlistRate: number | null
+      wishlistToCartRate: number | null
+      viewToCartRate: number | null
+      viewToPurchaseRate: number | null
+      averageHoursToPurchase: number | null
+      availableStock: number | null
+      unitsSold90Days: number
+      opportunityScore: number | null
+      opportunityConfidence: 'insufficient_data' | 'limited' | 'supported'
+      highOpportunity: boolean
+      highInterestLowConversion: boolean
+      mostViewedWithoutPurchases: boolean
+      previous: { views: number; viewToPurchaseRate: number | null }
+    }[]
+    highInterestLowConversion: AnalyticsOverviewData['advanced']['products']
+    mostViewedWithoutPurchases: AnalyticsOverviewData['advanced']['products']
+    highOpportunityProducts: AnalyticsOverviewData['advanced']['products']
+    bestPerformingProducts: { productId: string; product: { id: string; name: string; slug: string; image: string } | null; unitsPurchased: number; revenue: number }[]
+    inventory: {
+      products: { productId: string; productName: string; availableStock: number; unitsSold90Days: number; unitsPerDay: number; recent30DayUnits: number; previous30DayUnits: number; trendPercent: number | null; monthlyUnits: { month: string; units: number }[]; monthsWithSales: number; forecastAvailable: boolean; estimatedDaysOfStock: number | null }[]
+      variantAlerts: { productId: string; productName: string; size: string; color: string; unitsSold90Days: number; availableStock: number; estimatedDaysOfStock: number | null; forecastAvailable: boolean; severity: 'medium' | 'high' }[]
+    }
+    variants: { productId: string; productName: string; size: string; color: string; selectedVisitors: number; selections: number; purchaseVisitors: number; unitsPurchased: number; conversionRate: number | null; availableStock: number }[]
+    variantSizes: { value: string; selectedVisitors: number; purchaseVisitors: number; unitsPurchased: number; availableStock: number; conversionRate: number | null }[]
+    variantColors: { value: string; selectedVisitors: number; purchaseVisitors: number; unitsPurchased: number; availableStock: number; conversionRate: number | null }[]
+    collectionPerformance: { collectionId: string; collection: { name: string; slug: string } | null; views: number; visitors: number; productClickVisitors: number; purchasingVisitors: number; revenue: number; conversionRate: number | null }[]
+    checkout: {
+      stages: { stage: string; visitors: number; conversionFromPrevious: number | null; dropOffFromPrevious: number | null }[]
+      abandonedCheckouts: number
+      abandonmentRate: number | null
+      abandonedByStep: { step: string; count: number }[]
+      mostCommonExitStep: { step: string; count: number } | null
+      maturityMinutes: number
+      paymentStepsAvailable: boolean
+    }
+    campaigns: {
+      visitors: { source: string; medium: string; campaign: string; visitors: number; sessions: number }[]
+      firstTouch: { source: string; medium: string; campaign: string; visitors: number; attributedPurchasers: number; orders: number; revenue: number; conversionRate: number | null }[]
+      lastTouch: { source: string; medium: string; campaign: string; visitors: number; attributedPurchasers: number; orders: number; revenue: number; conversionRate: number | null }[]
+      campaignCostDataAvailable: boolean
+      roiAvailable: boolean
+    }
+    customers: {
+      metrics: { firstTimeCustomers: number; returningCustomers: number; periodCustomers: number; repeatPurchaseRate: number | null; averagePurchaseFrequency: number | null; averageDaysBetweenPurchases: number | null; averageLifetimeValue: number | null }
+      cohorts: { cohort: string; customers: number; months: { month: string; customers: number; retentionRate: number | null }[] }[]
+    }
+    insights: { title: string; description: string; metrics: Record<string, number | string | null>; comparisonPeriod: string; severity: 'low' | 'medium' | 'high'; recommendedAction: string }[]
+  }
+}
+type AnalyticsSection = 'overview' | 'website' | 'ecommerce' | 'products' | 'wishlist' | 'collections' | 'marketing' | 'customers' | 'reports'
+
+const analyticsSectionTitles: Record<AnalyticsSection, string> = {
+  overview: 'Analytics & Intelligence',
+  website: 'Website Performance',
+  ecommerce: 'E-commerce Performance',
+  products: 'Product Intelligence',
+  wishlist: 'Wishlist Performance',
+  collections: 'Collection Performance',
+  marketing: 'Marketing Performance',
+  customers: 'Customer Intelligence',
+  reports: 'Reports & Insights',
+}
+const analyticsSections: { section: AnalyticsSection; label: string; path: string; Icon: LucideIcon }[] = [
+  { section: 'overview', label: 'Overview', path: '/analytics/overview', Icon: BarChart3 },
+  { section: 'website', label: 'Website', path: '/analytics/website', Icon: Eye },
+  { section: 'ecommerce', label: 'E-commerce', path: '/analytics/ecommerce', Icon: ShoppingCart },
+  { section: 'products', label: 'Products', path: '/analytics/products', Icon: Package },
+  { section: 'wishlist', label: 'Wishlist', path: '/analytics/wishlist', Icon: Heart },
+  { section: 'collections', label: 'Collections', path: '/analytics/collections', Icon: Layers3 },
+  { section: 'marketing', label: 'Marketing', path: '/analytics/marketing', Icon: Megaphone },
+  { section: 'customers', label: 'Customers', path: '/analytics/customers', Icon: UserRoundSearch },
+  { section: 'reports', label: 'Reports', path: '/analytics/reports', Icon: FileDown },
+]
+const analyticsNumber = (value: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)
+const analyticsMoney = (value: number) => formatTnd(value)
+const analyticsPercent = (value: number | null) => value === null ? '—' : `${value.toFixed(1)}%`
+const analyticsChange = (current: number, previous: number) => previous ? `${((current - previous) / previous * 100).toFixed(1)}% vs previous` : current ? 'New this period' : '0% vs previous'
+const analyticsMetricChange = (key: string, data: AnalyticsOverviewData) => {
+  const comparison: Record<string, [number, number]> = {
+    visitors: [data.metrics.visitors, data.comparison.visitors],
+    sessions: [data.metrics.sessions, data.comparison.sessions],
+    pageViews: [data.metrics.pageViews, data.comparison.pageViews],
+    orders: [data.metrics.orders, data.comparison.orders],
+    revenue: [data.metrics.revenue, data.comparison.revenue],
+  }
+  const values = comparison[key]
+  return values ? analyticsChange(values[0], values[1]) : ''
+}
+
+function AnalyticsDashboard({ section }: { section: AnalyticsSection }) {
+  const [days, setDays] = useState(30)
+  const [reportMonth, setReportMonth] = useState(() => {
+    const date = new Date()
+    date.setUTCDate(1)
+    date.setUTCMonth(date.getUTCMonth() - 1)
+    return date.toISOString().slice(0, 7)
+  })
+  const [selectedFunnelStage, setSelectedFunnelStage] = useState('page_view')
+  const [data, setData] = useState<AnalyticsOverviewData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [reload, setReload] = useState(0)
+  const refreshRequested = useRef(false)
+  useEffect(() => {
+    let cancelled = false
+    const load = () => {
+      const periodQuery = section === 'reports' ? `month=${encodeURIComponent(reportMonth)}` : `days=${days}`
+      const refreshQuery = refreshRequested.current ? '&refresh=1' : ''
+      refreshRequested.current = false
+      apiRequest<AnalyticsOverviewData>(`/analytics/admin/overview?${periodQuery}${refreshQuery}`).then(result => {
+        if (!cancelled) { setData(result); setError(''); setLastUpdated(new Date()) }
+      }).catch((cause: unknown) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Unable to load analytics.')
+      }).finally(() => { if (!cancelled) setLoading(false) })
+    }
+    setLoading(true)
+    load()
+    const timer = section === 'overview' ? window.setInterval(load, 60_000) : undefined
+    return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer) }
+  }, [days, reportMonth, reload, section])
+
+  const exportCsv = () => {
+    if (!data) return
+    const csvCell = (value: string | number | boolean | null | undefined) => {
+      const text = String(value ?? '')
+      const safe = /^[=+\-@]/.test(text) ? `'${text}` : text
+      return `"${safe.replace(/"/g, '""')}"`
+    }
+    const sectionRows = (title: string, headers: (string | number)[], records: (string | number | boolean | null | undefined)[][]) => [
+      [],
+      [title],
+      headers,
+      ...records,
+    ]
+    const rows = [
+      ['OFF STUDIO — MONTHLY BUSINESS REPORT'],
+      ['Month', data.period.month ?? reportMonth],
+      ['Compared with', data.period.month ? 'Previous month, matched elapsed days when month-to-date' : `Previous ${days}-day period`],
+      ...sectionRows('Executive KPIs', ['Metric', 'Current', 'Previous period'], [
+        ['Unique visitors', data.metrics.visitors, data.comparison.visitors],
+        ['Sessions', data.metrics.sessions, data.comparison.sessions],
+        ['Page views', data.metrics.pageViews, data.comparison.pageViews],
+        ['Delivered orders', data.metrics.orders, data.comparison.orders],
+        ['Realized revenue (TND)', data.metrics.revenue, data.comparison.revenue],
+        ['Attributed conversion rate (%)', data.metrics.conversionRate, null],
+        ['Average order value (TND)', data.metrics.averageOrderValue, null],
+        ['Checkout abandonment rate (%)', data.metrics.checkoutAbandonmentRate, null],
+        ['Mature abandoned checkout sessions', data.metrics.checkoutAbandonedSessions, null],
+      ]),
+      ...sectionRows('Traffic and revenue by day', ['Date', 'Visitors', 'Sessions', 'Page views', 'Orders', 'Revenue (TND)'], data.daily.map(point => [point.date, point.visitors, point.sessions, point.pageViews, point.orders, point.revenue])),
+      ...sectionRows('Product performance and opportunity', ['Product', 'Views', 'Unique visitors', 'Wishlist additions', 'Wishlist visitors', 'Wishlist after view', 'Add-to-cart events', 'Cart visitors', 'View-to-purchase (%)', 'Confirmed units', '90-day units', 'Current stock', 'Opportunity score', 'Score confidence', 'High opportunity', 'High interest / low conversion'], data.advanced.products.map(row => [
+        row.product?.name ?? 'Unavailable product', row.views, row.uniqueViewers, row.wishlistAdditions, row.wishlistVisitors, row.wishlistAfterViewVisitorCount, row.cartAddEvents, row.cartVisitors,
+        row.viewToPurchaseRate, row.unitsPurchased, row.unitsSold90Days, row.availableStock, row.opportunityScore, row.opportunityConfidence, row.highOpportunity, row.highInterestLowConversion,
+      ])),
+      ...sectionRows('Best performing products', ['Product', 'Confirmed units', 'Item revenue (TND)'], data.advanced.bestPerformingProducts.map(row => [row.product?.name ?? 'Unavailable product', row.unitsPurchased, row.revenue])),
+      ...sectionRows('Traffic sources', ['Source', 'Visitors', 'Sessions'], data.sources.map(row => [row._id, row.visitors, row.sessions])),
+      ...sectionRows('Collection performance', ['Collection', 'Views', 'Product click visitors', 'Purchasing visitors', 'Conversion (%)', 'Attributed item revenue (TND)'], data.advanced.collectionPerformance.map(row => [
+        row.collection?.name ?? 'Unavailable collection', row.views, row.productClickVisitors, row.purchasingVisitors, row.conversionRate, row.revenue,
+      ])),
+      ...sectionRows('First-touch campaign performance', ['Source', 'Medium', 'Campaign', 'Campaign visitors', 'Attributed purchasers', 'Orders', 'Revenue (TND)', 'Conversion (%)'], data.advanced.campaigns.firstTouch.map(row => [row.source, row.medium, row.campaign, row.visitors, row.attributedPurchasers, row.orders, row.revenue, row.conversionRate])),
+      ...sectionRows('Last-touch campaign performance', ['Source', 'Medium', 'Campaign', 'Campaign visitors', 'Attributed purchasers', 'Orders', 'Revenue (TND)', 'Conversion (%)'], data.advanced.campaigns.lastTouch.map(row => [row.source, row.medium, row.campaign, row.visitors, row.attributedPurchasers, row.orders, row.revenue, row.conversionRate])),
+      ...sectionRows('CTA performance', ['CTA', 'Page', 'Impression events', 'Click events', 'Visitor click-through rate (%)'], data.ctas.map(row => [row.label ?? row._id, row.location, row.impressions, row.clicks, row.ctr])),
+      ...sectionRows('Customer retention', ['Metric', 'Value'], [
+        ['First-time customers', data.advanced.customers.metrics.firstTimeCustomers],
+        ['Returning customers', data.advanced.customers.metrics.returningCustomers],
+        ['Repeat purchase rate (%)', data.advanced.customers.metrics.repeatPurchaseRate],
+        ['Average purchase frequency', data.advanced.customers.metrics.averagePurchaseFrequency],
+        ['Average days between purchases', data.advanced.customers.metrics.averageDaysBetweenPurchases],
+        ['Average lifetime value (TND)', data.advanced.customers.metrics.averageLifetimeValue],
+      ]),
+      ...sectionRows('Checkout funnel', ['Step', 'Sessions', 'Conversion from previous (%)', 'Drop-off from previous (%)'], data.advanced.checkout.stages.map(row => [row.stage, row.visitors, row.conversionFromPrevious, row.dropOffFromPrevious])),
+      ...sectionRows('Customer cohorts', ['Cohort month', 'New customers', 'Retention by month'], data.advanced.customers.cohorts.flatMap(cohort => cohort.months.map(month => [cohort.cohort, cohort.customers, `${month.month}: ${month.retentionRate ?? ''}%`]))),
+      ...sectionRows('Inventory and historical demand', ['Product', 'Stock', 'Units sold (90 days)', 'Recent 30-day units', 'Previous 30-day units', 'Demand change (%)', 'Monthly units by calendar month', 'Months with sales', 'Forecast days of stock'], data.advanced.inventory.products.map(row => [
+        row.productName, row.availableStock, row.unitsSold90Days, row.recent30DayUnits, row.previous30DayUnits, row.trendPercent, JSON.stringify(row.monthlyUnits), row.monthsWithSales, row.estimatedDaysOfStock,
+      ])),
+      ...sectionRows('High-demand, low-stock variants', ['Product', 'Color', 'Size', 'Units sold (90 days)', 'Available stock', 'Forecast days of stock', 'Severity'], data.advanced.inventory.variantAlerts.map(row => [
+        row.productName, row.color, row.size, row.unitsSold90Days, row.availableStock, row.estimatedDaysOfStock, row.severity,
+      ])),
+      ...sectionRows('Business opportunities', ['Title', 'Description', 'Severity', 'Comparison period', 'Recommended action', 'Supporting metrics'], data.advanced.insights.map(row => [
+        row.title, row.description, row.severity, row.comparisonPeriod, row.recommendedAction, JSON.stringify(row.metrics),
+      ])),
+    ]
+    const csv = `\uFEFF${rows.map(row => row.map(csvCell).join(',')).join('\r\n')}`
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `off-business-report-${data.period.month ?? `${days}-days`}.csv`
+    anchor.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
+  }
+
+  const maxVisitors = Math.max(1, ...(data?.daily.map(point => point.visitors) ?? [0]))
+  const maxRevenue = Math.max(1, ...(data?.daily.map(point => point.revenue) ?? [0]))
+  const visitorPoints = (data?.daily ?? []).map((point, index, list) => {
+    const x = list.length < 2 ? 200 : index * 400 / (list.length - 1)
+    return `${x},${84 - point.visitors / maxVisitors * 70}`
+  }).join(' ')
+  const revenuePoints = (data?.daily ?? []).map((point, index, list) => {
+    const x = list.length < 2 ? 200 : index * 400 / (list.length - 1)
+    return `${x},${84 - point.revenue / maxRevenue * 70}`
+  }).join(' ')
+  const metricCards = data ? [
+    ['Unique Visitors', analyticsNumber(data.metrics.visitors), 'consented visitors in selected period', 'visitors'],
+    ['Sessions', analyticsNumber(data.metrics.sessions), 'consented sessions in selected period', 'sessions'],
+    ['Page Views', analyticsNumber(data.metrics.pageViews), 'consented analytics only', 'pageViews'],
+    ['Delivered Orders', analyticsNumber(data.metrics.orders), 'COD orders delivered and paid', 'orders'],
+    ['Realized Revenue', analyticsMoney(data.metrics.revenue), 'COD orders delivered and paid', 'revenue'],
+    ['Conversion Rate', analyticsPercent(data.metrics.conversionRate), 'attributed to consented sessions', 'conversion'],
+    ['Average Order Value', data.metrics.averageOrderValue === null ? '—' : analyticsMoney(data.metrics.averageOrderValue), 'delivered orders', 'aov'],
+    ['Returning Visitors', analyticsPercent(data.metrics.returningVisitorRate), '2+ sessions in period', 'returning'],
+    ['Active Visitors', analyticsNumber(data.metrics.activeVisitors), 'active in last 5 minutes', 'active'],
+  ] as const : []
+  const topProductLists = [
+    { title: 'Most Viewed', rows: data?.topViewed ?? [], count: (row: AnalyticsProductRow) => row.views ?? 0 },
+    { title: 'Most Wishlisted', rows: data?.topWishlisted ?? [], count: (row: AnalyticsProductRow) => row.additions ?? 0 },
+    { title: 'Most Added to Cart', rows: data?.topAddedToCart ?? [], count: (row: AnalyticsProductRow) => row.additions ?? 0 },
+    { title: 'Most Purchased', rows: data?.topPurchased ?? [], count: (row: AnalyticsProductRow) => row.purchases ?? 0 },
+  ]
+  const sourceMax = Math.max(1, ...(data?.sources.map(source => source.sessions) ?? [0]))
+  const insights = data?.advanced.insights ?? []
+  const sectionDescriptions: Record<AnalyticsSection, string> = {
+    overview: 'A privacy-conscious view of consented traffic, confirmed sales, and emerging business signals.',
+    website: 'Understand consented visitor activity, traffic sources, and the pages attracting attention.',
+    ecommerce: 'Follow the customer journey from cart activity through checkout and confirmed orders.',
+    products: 'Explore product interest, variant demand, conversion, and confirmed sales performance.',
+    wishlist: 'Review consented wishlist activity and the products customers choose to save.',
+    collections: 'Compare collection engagement and consent-attributed purchases for the selected period.',
+    marketing: 'Understand campaign visits and attribution; revenue is limited to paid and delivered orders.',
+    customers: 'Review aggregate verified-customer cohorts and lifetime purchase behavior.',
+    reports: 'Explore a calendar-month business report and export the available verified metrics.',
+  }
+  const lastUpdatedLabel = lastUpdated
+    ? `Updated ${new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit' }).format(lastUpdated)}`
+    : 'Waiting for first report'
+
+  const SectionIcon = analyticsSections.find(item => item.section === section)?.Icon ?? BarChart3
+  return <div className="admin-content analytics-content">
+    <header className="analytics-heading">
+      <div className="analytics-heading-copy">
+        <span className="analytics-heading-icon"><SectionIcon size={21} strokeWidth={1.7} /></span>
+        <div><p className="admin-eyebrow">ANALYTICS & INTELLIGENCE</p><h1>{analyticsSectionTitles[section]}</h1><p className="analytics-intro">{sectionDescriptions[section]}</p></div>
+      </div>
+      <div className="analytics-toolbar">{section === 'reports' ? <label className="analytics-range">Report month<input type="month" value={reportMonth} max={new Date().toISOString().slice(0, 7)} onChange={event => { if (event.target.value) setReportMonth(event.target.value) }} /></label> : <label className="analytics-range">Period<select value={days} onChange={event => setDays(Number(event.target.value))}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select></label>}<span className="analytics-updated" aria-live="polite">{lastUpdatedLabel}</span><button className="admin-button" type="button" disabled={loading} onClick={() => { refreshRequested.current = true; setReload(value => value + 1) }}>Refresh</button>{section === 'reports' && <button className="admin-button primary" type="button" disabled={!data || loading} onClick={exportCsv}>Export CSV</button>}</div>
+    </header>
+    <nav className="analytics-subnav" aria-label="Analytics reports">{analyticsSections.map(({ section: itemSection, label, path, Icon }) => <NavLink key={itemSection} to={path} end className={({ isActive }) => isActive ? 'active' : ''}><Icon size={15} strokeWidth={1.8} /><span>{label}</span></NavLink>)}</nav>
+    {error && <div className="admin-alert" role="alert">{error}</div>}
+    {error && data && <div className="analytics-refresh-status" role="status">Showing the last successful report while the selected period could not be loaded.</div>}
+    {loading && data && <div className="analytics-refresh-status" role="status">Updating this report…</div>}
+    {loading && !data ? <section className="analytics-loading-state" role="status" aria-label="Loading analytics"><span className="analytics-loading-label">Loading analytics…</span><div className="analytics-loading-kpis" aria-hidden="true">{Array.from({ length: 4 }, (_, index) => <i key={index} />)}</div><div className="analytics-loading-chart" aria-hidden="true"><i /><i /><i /></div></section> : !data ? <section className="panel analytics-error-state" role="alert"><p>{error || 'No analytics report is available.'}</p><button className="admin-button" type="button" onClick={() => setReload(value => value + 1)}>Retry</button></section> : <>
+      {section === 'overview' && <>
+        <div className="analytics-live"><span className="analytics-live-dot" /> LIVE SNAPSHOT <b>{analyticsNumber(data.metrics.activeVisitors)}</b> active visitors · refreshed every minute</div>
+        <div className="metric-grid analytics-metrics">{metricCards.map(([label, value, note, key]) => <article className="metric-card" key={label}><p>{label}</p><strong>{value}</strong><small className="analytics-delta">{analyticsMetricChange(key, data)}</small><span>{note}</span></article>)}</div>
+        <section className="panel analytics-chart-panel"><div className="panel-heading"><div><p className="analytics-section-kicker">PERFORMANCE</p><h2>Visitors & Revenue</h2><p>Daily consented traffic and realized cash-on-delivery sales</p></div><div className="analytics-legend"><span><i className="analytics-dot visitors" />Visitors</span><span><i className="analytics-dot revenue" />Revenue · paid & delivered</span></div></div>{data.daily.some(point => point.visitors || point.revenue) ? <div className="analytics-chart"><div className="analytics-chart-grid"><i /><i /><i /><i /></div><svg viewBox="0 0 400 90" preserveAspectRatio="none" role="img" aria-label="Daily visitors and revenue trend, each series indexed to its own peak"><polyline points={visitorPoints} fill="none" stroke="var(--analytics-ink)" strokeWidth="2" vectorEffect="non-scaling-stroke" />{data.daily.map((point, index) => <circle key={`visitor-${point.date}`} cx={data.daily.length < 2 ? 200 : index * 400 / (data.daily.length - 1)} cy={84 - point.visitors / maxVisitors * 70} r="2.5" fill="var(--analytics-ink)" tabIndex={0} aria-label={`${point.date}: ${point.visitors} visitors`}><title>{point.date}: {point.visitors} visitors</title></circle>)}<polyline points={revenuePoints} fill="none" stroke="var(--analytics-accent)" strokeWidth="2" vectorEffect="non-scaling-stroke" />{data.daily.map((point, index) => <circle key={`revenue-${point.date}`} cx={data.daily.length < 2 ? 200 : index * 400 / (data.daily.length - 1)} cy={84 - point.revenue / maxRevenue * 70} r="2.5" fill="var(--analytics-accent)" tabIndex={0} aria-label={`${point.date}: ${analyticsMoney(point.revenue)} revenue`}><title>{point.date}: {analyticsMoney(point.revenue)} revenue</title></circle>)}</svg><div className="analytics-chart-labels"><span>{data.daily[0]?.date ?? ''}</span><span>{data.daily[Math.floor(data.daily.length / 2)]?.date ?? ''}</span><span>{data.daily[data.daily.length - 1]?.date ?? ''}</span></div></div> : <div className="analytics-empty">No consented traffic or delivered sales in this period yet.</div>}</section>
+        <div className="analytics-two-column"><AnalyticsFunnel title="Conversion Funnel" description="Tracked visitors through delivered cash-on-delivery orders" stages={data.funnel} selectedStage={selectedFunnelStage} onSelect={setSelectedFunnelStage} /><AnalyticsInsightPanel insights={insights} /></div>
+        <div className="analytics-three-column">{topProductLists.slice(0, 3).map(list => <AnalyticsProductPanel key={list.title} title={list.title} rows={list.rows} count={list.count} />)}</div>
+        <div className="analytics-two-column"><AnalyticsProductPanel title="Most Purchased" rows={data.topPurchased} count={row => row.purchases ?? 0} /><AnalyticsCollectionPanel rows={data.topCollections} /></div>
+        <section className="panel analytics-panel"><div className="panel-heading"><div><h2>Traffic Sources</h2><p>Attributed from consented session entry data</p></div><Link to="/analytics/marketing" className="view-all">Marketing details <ArrowUp size={12} /></Link></div><AnalyticsSourceRows sources={data.sources} max={sourceMax} /></section>
+      </>}
+      {section === 'website' && <>
+        <div className="metric-grid analytics-metrics">
+          {metricCards.filter(([, , , key]) => ['visitors', 'sessions', 'pageViews'].includes(key)).map(([label, value, note, key]) => <article className="metric-card" key={label}><p>{label}</p><strong>{value}</strong><small className="analytics-delta">{analyticsMetricChange(key, data)}</small><span>{note}</span></article>)}
+          <article className="metric-card"><p>Returning Visitors</p><strong>{analyticsPercent(data.metrics.returningVisitorRate)}</strong><span>Visitors with 2+ sessions in period</span></article>
+          <article className="metric-card"><p>Active Visitors</p><strong>{analyticsNumber(data.metrics.activeVisitors)}</strong><span>Currently active in the last five minutes</span></article>
+        </div>
+        <div className="analytics-two-column">
+          <section className="panel analytics-panel"><div className="panel-heading"><div><p className="analytics-section-kicker">DISCOVERY</p><h2>Top Pages</h2><p>Page views and unique visitors</p></div></div>{data.pages.length ? <div className="table-scroll"><table><thead><tr><th>PAGE</th><th>VIEWS</th><th>VISITORS</th><th>SESSIONS</th></tr></thead><tbody>{data.pages.map(row => <tr key={row._id}><td><code>{row._id}</code></td><td>{analyticsNumber(row.views)}</td><td>{analyticsNumber(row.visitors)}</td><td>{analyticsNumber(row.sessions)}</td></tr>)}</tbody></table></div> : <div className="analytics-empty">No page-view records for this period.</div>}</section>
+          <section className="panel analytics-panel"><div className="panel-heading"><div><p className="analytics-section-kicker">ACQUISITION</p><h2>Traffic Sources</h2><p>Consented session entry data</p></div></div><AnalyticsSourceRows sources={data.sources} max={sourceMax} /></section>
+        </div>
+        <section className="panel analytics-panel"><div className="panel-heading"><div><h2>Daily Visitor Activity</h2><p>Visitors, sessions and page views · UTC calendar dates</p></div></div><AnalyticsDailyTable rows={data.daily} /></section>
+      </>}
+      {section === 'ecommerce' && <>
+        <div className="metric-grid analytics-metrics">
+          {metricCards.filter(([, , , key]) => ['orders', 'revenue', 'conversion', 'aov'].includes(key)).map(([label, value, note, key]) => <article className="metric-card" key={label}><p>{label}</p><strong>{value}</strong><small className="analytics-delta">{analyticsMetricChange(key, data)}</small><span>{note}</span></article>)}
+          <article className="metric-card"><p>Checkout Abandonment</p><strong>{analyticsPercent(data.advanced.checkout.abandonmentRate)}</strong><span>{analyticsNumber(data.advanced.checkout.abandonedCheckouts)} mature consented sessions without order confirmation</span></article>
+        </div>
+        <div className="analytics-two-column analytics-commerce-panels">
+          <AnalyticsCheckoutPanel report={data.advanced.checkout} />
+          <section className="panel analytics-panel"><div className="panel-heading"><div><p className="analytics-section-kicker">ORDER PERFORMANCE</p><h2>Sales by Day</h2><p>Revenue includes paid and delivered orders only</p></div></div><AnalyticsDailyTable rows={data.daily} /></section>
+        </div>
+        <section className="panel analytics-panel"><div className="panel-heading"><div><p className="analytics-section-kicker">PRODUCT MIX</p><h2>Best Selling Products</h2><p>Confirmed paid-and-delivered order lines</p></div></div><AnalyticsProductPanel title="Most Purchased" rows={data.topPurchased} count={row => row.purchases ?? 0} /></section>
+      </>}
+      {section === 'products' && <>
+        <div className="analytics-three-column">
+          {topProductLists.filter(list => list.title !== 'Most Wishlisted').map(list => <AnalyticsProductPanel key={list.title} title={list.title} rows={list.rows} count={list.count} />)}
+        </div>
+        <AnalyticsProductIntelligence report={data.advanced} />
+        <div className="analytics-two-column"><AnalyticsVariantTable title="Size Performance" rows={data.advanced.variantSizes} /><AnalyticsVariantTable title="Color Performance" rows={data.advanced.variantColors} /></div>
+        <AnalyticsVariantDetail rows={data.advanced.variants} />
+        <div className="analytics-two-column"><AnalyticsDemandPanel title="Size Demand vs Stock" demand={data.demand.sizes} stock={data.demand.sizeStock} /><AnalyticsDemandPanel title="Color Demand vs Stock" demand={data.demand.colors} stock={data.demand.colorStock} /></div>
+      </>}
+      {section === 'wishlist' && <>
+        <div className="analytics-three-column"><AnalyticsProductPanel title="Most Wishlisted" rows={data.topWishlisted} count={row => row.additions ?? 0} /><AnalyticsProductPanel title="Most Viewed" rows={data.topViewed} count={row => row.views ?? 0} /><AnalyticsProductPanel title="Most Added to Cart" rows={data.topAddedToCart} count={row => row.additions ?? 0} /></div>
+        <section className="panel analytics-panel"><div className="panel-heading"><div><p className="analytics-section-kicker">PRODUCT INTEREST</p><h2>Wishlist & Product Journey</h2><p>Consented events and visitor-level conversion rates supplied by Analytics reports</p></div></div>{data.advanced.products.some(row => row.wishlistAdditions > 0) ? <div className="table-scroll"><table><thead><tr><th>PRODUCT</th><th>WISHLIST ADDS</th><th>UNIQUE SAVERS</th><th>WISHLIST → CART</th><th>VIEW → PURCHASE</th></tr></thead><tbody>{data.advanced.products.filter(row => row.wishlistAdditions > 0).map(row => <tr key={row.productId}><td>{row.product?.name ?? 'Unavailable product'}</td><td>{analyticsNumber(row.wishlistAdditions)}</td><td>{analyticsNumber(row.wishlistVisitors)}</td><td>{analyticsPercent(row.wishlistToCartRate)}</td><td>{analyticsPercent(row.viewToPurchaseRate)}</td></tr>)}</tbody></table></div> : <div className="analytics-empty">No wishlist activity is recorded for this period. Necessary storefront functionality remains available.</div>}<p className="analytics-data-note">The current Analytics API does not expose a wishlist-to-order conversion metric; none is inferred here.</p></section>
+      </>}
+      {section === 'collections' && <>
+        <AnalyticsCollectionPerformance rows={data.advanced.collectionPerformance} />
+        <div className="analytics-two-column"><AnalyticsCollectionPanel rows={data.topCollections} /><section className="panel analytics-panel"><div className="panel-heading"><div><p className="analytics-section-kicker">ATTRIBUTED REVENUE</p><h2>Collection Outcomes</h2><p>Revenue follows existing paid-and-delivered order rules</p></div></div>{data.advanced.collectionPerformance.length ? <div className="analytics-ranking-list">{data.advanced.collectionPerformance.slice(0, 8).map((row, index) => <article className="analytics-ranking-row" key={row.collectionId}><span className="analytics-ranking-index">{String(index + 1).padStart(2, '0')}</span><div><b>{row.collection?.name ?? 'Unavailable collection'}</b><small>{analyticsNumber(row.visitors)} visitors · {analyticsNumber(row.views)} views</small></div><strong>{analyticsMoney(row.revenue)}</strong></article>)}</div> : <div className="analytics-empty">Collection outcomes will appear when consented engagement and qualifying orders are recorded.</div>}</section></div>
+      </>}
+      {section === 'marketing' && <><section className="panel analytics-panel"><div className="panel-heading"><div><h2>Traffic Sources</h2><p>Session sources; campaign labels are recorded only with analytics consent</p></div></div><AnalyticsSourceRows sources={data.sources} max={sourceMax} /></section><div className="analytics-two-column"><AnalyticsAttributionPanel title="First-touch Sales Attribution" rows={data.attribution.firstTouch} /><AnalyticsAttributionPanel title="Last-touch Sales Attribution" rows={data.attribution.lastTouch} /></div><AnalyticsCampaignPanel report={data.advanced.campaigns} /><section className="panel analytics-panel"><div className="panel-heading"><div><h2>CTA Performance</h2><p>Impressions counted at 50% visibility; CTR is unique clicked visitors among visitors with a measured impression.</p></div></div>{data.ctas.length ? <div className="table-scroll"><table><thead><tr><th>CTA</th><th>PAGE</th><th>IMPRESSIONS</th><th>CLICKS</th><th>CTR (VISITORS)</th></tr></thead><tbody>{data.ctas.map(cta => <tr key={cta._id}><td>{cta.label || cta._id}</td><td><code>{cta.location || '—'}</code></td><td>{analyticsNumber(cta.impressions)}</td><td>{analyticsNumber(cta.clicks)}</td><td>{analyticsPercent(cta.ctr)}</td></tr>)}</tbody></table></div> : <div className="analytics-empty">No CTA impression or click events have been recorded yet.</div>}</section></>}
+      {section === 'customers' && <><div className="metric-grid analytics-metrics"><article className="metric-card"><p>First-time / Returning</p><strong>{analyticsNumber(data.advanced.customers.metrics.firstTimeCustomers)} / {analyticsNumber(data.advanced.customers.metrics.returningCustomers)}</strong><span>verified customer accounts with a confirmed order in period</span></article><article className="metric-card"><p>Repeat Purchase Rate</p><strong>{analyticsPercent(data.advanced.customers.metrics.repeatPurchaseRate)}</strong><span>lifetime paid-and-delivered account customers with 2+ orders</span></article><article className="metric-card"><p>Customer Lifetime Value</p><strong>{data.advanced.customers.metrics.averageLifetimeValue === null ? '—' : analyticsMoney(data.advanced.customers.metrics.averageLifetimeValue)}</strong><span>mean lifetime confirmed revenue per verified account</span></article></div><AnalyticsCustomerCohorts cohorts={data.advanced.customers.cohorts} metrics={data.advanced.customers.metrics} /></>}
+      {section === 'reports' && <><div className="metric-grid analytics-metrics">{metricCards.slice(0, 6).map(([label, value, note, key]) => <article className="metric-card" key={label}><p>{label}</p><strong>{value}</strong><small className="analytics-delta">{analyticsMetricChange(key, data)}</small><span>{note}</span></article>)}</div><section className="panel analytics-panel"><div className="panel-heading"><div><h2>Monthly Business Report</h2><p>Calendar-month performance compared with the previous month; export includes traffic sources, product, collection, campaign and CTA performance, retention, funnel, inventory, and insights.</p></div></div><AnalyticsDailyTable rows={data.daily} /></section><AnalyticsInsightPanel insights={insights} /></>}
+    </>}
+  </div>
+}
+
+function AnalyticsProductPanel({ title, rows, count }: { title: string; rows: AnalyticsProductRow[]; count: (row: AnalyticsProductRow) => number }) {
+  const emptyMessage = title === 'Most Viewed'
+    ? 'No product views recorded for this period.'
+    : title === 'Most Wishlisted'
+      ? 'No wishlist activity recorded for this period.'
+      : title === 'Most Added to Cart'
+        ? 'No cart additions recorded for this period.'
+        : 'No confirmed purchases recorded for this period.'
+  return <section className="panel analytics-product-panel"><div className="panel-heading"><div><h2>{title}</h2></div></div>{rows.length ? rows.map(row => <div className="analytics-product-row" key={row.product?.id ?? title}><span>{row.product?.image ? <img src={row.product.image} alt="" /> : <i />}</span><div><b>{row.product ? <Link className="analytics-product-link" to={`/products?q=${encodeURIComponent(row.product.name)}`}>{row.product.name}</Link> : 'Unavailable product'}</b><small>{row.product?.slug ?? ''}</small></div><strong>{analyticsNumber(count(row))}</strong></div>) : <div className="analytics-empty compact">{emptyMessage}</div>}</section>
+}
+
+function AnalyticsCollectionPanel({ rows }: { rows: AnalyticsOverviewData['topCollections'] }) {
+  return <section className="panel analytics-product-panel"><div className="panel-heading"><div><h2>Most Viewed Collections</h2></div></div>{rows.length ? rows.map(row => <div className="analytics-product-row" key={row.collection?.id ?? row._id}><span>{row.collection?.image ? <img src={row.collection.image} alt="" /> : <i />}</span><div><b>{row.collection?.name ?? 'Unavailable collection'}</b><small>{analyticsNumber(row.visitors)} unique visitors</small></div><strong>{analyticsNumber(row.views)}</strong></div>) : <div className="analytics-empty compact">No collection views recorded.</div>}</section>
+}
+
+function AnalyticsFunnel({ title, description, stages, selectedStage, onSelect }: { title: string; description: string; stages: AnalyticsOverviewData['funnel']; selectedStage: string; onSelect: (stage: string) => void }) {
+  const stageLabels: Record<string, string> = { page_view: 'Website Visit', product_view: 'Product View', add_to_cart: 'Add to Cart', begin_checkout: 'Begin Checkout', purchase: 'Purchase' }
+  const selectedIndex = Math.max(0, stages.findIndex(stage => stage.stage === selectedStage))
+  const selected = stages[selectedIndex]
+  const previous = stages[selectedIndex - 1]
+  const first = stages[0]?.visitors ?? 0
+  const conversion = first && selected ? selected.visitors / first * 100 : null
+  const dropOff = previous?.visitors ? (previous.visitors - (selected?.visitors ?? 0)) / previous.visitors * 100 : null
+  return <section className="panel analytics-funnel"><div className="panel-heading"><div><h2>{title}</h2><p>{description}</p></div></div>{stages.map((stage, index) => { const prior = stages[index - 1]?.visitors ?? first; const label = stageLabels[stage.stage] ?? stage.stage; return <button className={`analytics-funnel-row${selectedStage === stage.stage ? ' selected' : ''}`} type="button" aria-pressed={selectedStage === stage.stage} key={stage.stage} onClick={() => onSelect(stage.stage)}><span>{label}</span><div className="analytics-funnel-track"><i style={{ width: `${first ? Math.min(100, stage.visitors / first * 100) : 0}%` }} /></div><b>{analyticsNumber(stage.visitors)}</b><small>{index ? `${prior ? (stage.visitors / prior * 100).toFixed(1) : '0.0'}% from prior` : '100%'}</small></button>})}<div className="analytics-funnel-detail" aria-live="polite"><b>{selected ? stageLabels[selected.stage] ?? selected.stage : 'Stage'}</b><span>{analyticsNumber(selected?.visitors ?? 0)} visitors · {analyticsPercent(conversion)} of visits{dropOff === null ? '' : ` · ${dropOff.toFixed(1)}% drop-off from prior stage`}</span></div></section>
+}
+
+function AnalyticsCheckoutPanel({ report }: { report: AnalyticsOverviewData['advanced']['checkout'] }) {
+  const labels: Record<string, string> = {
+    checkout_started: 'Checkout started',
+    shipping_information_completed: 'Shipping information completed',
+    order_confirmed: 'Order confirmed',
+  }
+  return <section className="panel analytics-panel analytics-advanced-panel"><div className="panel-heading"><div><h2>Checkout Funnel</h2><p>Unique consented sessions; abandoned sessions are mature for at least {report.maturityMinutes} minutes.</p></div></div>{report.stages.length ? <div className="table-scroll"><table><thead><tr><th>STEP</th><th>SESSIONS</th><th>CONVERSION FROM PRIOR</th><th>DROP-OFF FROM PRIOR</th></tr></thead><tbody>{report.stages.map(stage => <tr key={stage.stage}><td>{labels[stage.stage] ?? stage.stage}</td><td>{analyticsNumber(stage.visitors)}</td><td>{analyticsPercent(stage.conversionFromPrevious)}</td><td>{analyticsPercent(stage.dropOffFromPrevious)}</td></tr>)}</tbody></table></div> : <div className="analytics-empty compact">No checkout-step records in this period.</div>}<div className="analytics-checkout-summary"><span><b>Abandoned:</b> {analyticsNumber(report.abandonedCheckouts)} ({analyticsPercent(report.abandonmentRate)})</span><span><b>Most common exit:</b> {report.mostCommonExitStep ? labels[report.mostCommonExitStep.step] ?? report.mostCommonExitStep.step : '—'}</span></div><p className="analytics-data-note">Cash on delivery is the only active payment method. Payment-attempt, failure, and success steps are not reported because the app has no active online payment flow.</p></section>
+}
+
+function AnalyticsProductIntelligence({ report }: { report: AnalyticsOverviewData['advanced'] }) {
+  const [view, setView] = useState<'conversion' | 'opportunity' | 'inventory' | 'best'>('conversion')
+  const products = report.products.filter(row => row.uniqueViewers > 0).slice(0, 10)
+  const tabs = [
+    ['conversion', 'Conversion'],
+    ['opportunity', 'Opportunities'],
+    ['inventory', 'Inventory'],
+    ['best', 'Best performers'],
+  ] as const
+  return <section className="panel analytics-panel analytics-advanced-panel"><div className="panel-heading"><div><h2>Product & Inventory Intelligence</h2><p>Consent-attributed product interest, confirmed order data, and current active stock.</p></div><div className="analytics-variant-switch" role="group" aria-label="Product intelligence view">{tabs.map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)}>{label}</button>)}</div></div>
+    {view === 'conversion' && <>{products.length ? <div className="table-scroll"><table><thead><tr><th>PRODUCT</th><th>VIEWERS</th><th>VIEW → WISHLIST</th><th>WISHLIST → CART</th><th>VIEW → CART</th><th>VIEW → PURCHASE</th><th>AVG. HOURS TO PURCHASE</th></tr></thead><tbody>{products.map(row => <tr key={row.productId}><td>{row.product ? <Link className="analytics-product-link" to={`/products?q=${encodeURIComponent(row.product.name)}`}>{row.product.name}</Link> : 'Unavailable product'}</td><td>{analyticsNumber(row.uniqueViewers)}</td><td>{analyticsPercent(row.viewToWishlistRate)}</td><td>{analyticsPercent(row.wishlistToCartRate)}</td><td>{analyticsPercent(row.viewToCartRate)}</td><td>{analyticsPercent(row.viewToPurchaseRate)}</td><td>{row.averageHoursToPurchase === null ? '—' : row.averageHoursToPurchase.toFixed(1)}</td></tr>)}</tbody></table></div> : <div className="analytics-empty compact">Product conversion reports appear after consented product activity and attributed confirmed purchases are recorded.</div>}<div className="analytics-two-column analytics-product-flags"><div><h3>High interest, low conversion</h3>{report.highInterestLowConversion.slice(0, 5).map(row => <p key={row.productId}>{row.product?.name} · {analyticsNumber(row.wishlistAfterViewVisitorCount)} wishlist-after-view visitors · {analyticsPercent(row.viewToPurchaseRate)} purchase rate</p>)}{!report.highInterestLowConversion.length && <small>No products meet the evidence threshold.</small>}</div><div><h3>Most viewed without attributed purchases</h3>{report.mostViewedWithoutPurchases.slice(0, 5).map(row => <p key={row.productId}>{row.product?.name} · {analyticsNumber(row.uniqueViewers)} visitors</p>)}{!report.mostViewedWithoutPurchases.length && <small>No products meet the evidence threshold.</small>}</div></div></>}
+    {view === 'opportunity' && <><p className="analytics-data-note">Opportunity score (0–100) weights relative views, unique visitors, wishlist additions, cart events, wishlist/cart conversion, purchase conversion, confirmed units, and trailing-90-day sales pressure against active stock. It is a relative prioritization index, not a forecast; fewer than 5 unique viewers yields no score, and only 20+ viewers are labeled supported.</p>{report.highOpportunityProducts.length ? <div className="table-scroll"><table><thead><tr><th>PRODUCT</th><th>SCORE</th><th>CONFIDENCE</th><th>VIEWERS</th><th>WISHLIST ADDS</th><th>CART EVENTS</th><th>VIEW → PURCHASE</th><th>90-DAY SALES / STOCK</th></tr></thead><tbody>{report.highOpportunityProducts.map(row => <tr key={row.productId}><td>{row.product?.name ?? 'Unavailable product'}</td><td>{row.opportunityScore}</td><td>{row.opportunityConfidence}</td><td>{analyticsNumber(row.uniqueViewers)}</td><td>{analyticsNumber(row.wishlistAdditions)}</td><td>{analyticsNumber(row.cartAddEvents)}</td><td>{analyticsPercent(row.viewToPurchaseRate)}</td><td>{analyticsNumber(row.unitsSold90Days)} / {row.availableStock === null ? '—' : analyticsNumber(row.availableStock)}</td></tr>)}</tbody></table></div> : <div className="analytics-empty compact">No high-opportunity products meet the supported sample threshold yet.</div>}{report.products.some(row => row.opportunityConfidence === 'limited') && <p className="analytics-data-note">Limited-sample products are excluded from the high-opportunity ranking until they reach 20 unique viewers.</p>}</>}
+    {view === 'inventory' && <><div className="table-scroll"><table><thead><tr><th>PRODUCT</th><th>STOCK</th><th>90-DAY UNITS</th><th>RECENT 30 DAYS</th><th>PRIOR 30 DAYS</th><th>TREND</th><th>MONTHLY HISTORY</th><th>EST. STOCK COVER</th></tr></thead><tbody>{report.inventory.products.slice(0, 12).map(row => <tr key={row.productId}><td>{row.productName}</td><td>{analyticsNumber(row.availableStock)}</td><td>{analyticsNumber(row.unitsSold90Days)}</td><td>{analyticsNumber(row.recent30DayUnits)}</td><td>{analyticsNumber(row.previous30DayUnits)}</td><td>{row.trendPercent === null ? '—' : `${row.trendPercent > 0 ? '+' : ''}${row.trendPercent.toFixed(1)}%`}</td><td>{row.monthlyUnits.map(month => `${month.month}: ${month.units}`).join(' · ') || '—'}</td><td>{row.estimatedDaysOfStock === null ? 'Insufficient history' : `${row.estimatedDaysOfStock.toFixed(0)} days`}</td></tr>)}</tbody></table></div><p className="analytics-data-note">Stock-cover estimates require at least three confirmed units across two or more months in the 90-day history. Demand alerts use confirmed sales and current active variant stock.</p><h3>High-demand, low-stock variants</h3>{report.inventory.variantAlerts.length ? <div className="table-scroll"><table><thead><tr><th>PRODUCT</th><th>COLOR</th><th>SIZE</th><th>90-DAY UNITS</th><th>STOCK</th><th>SEVERITY</th></tr></thead><tbody>{report.inventory.variantAlerts.slice(0, 10).map(row => <tr key={`${row.productId}-${row.color}-${row.size}`}><td>{row.productName}</td><td>{row.color || '—'}</td><td>{row.size || '—'}</td><td>{analyticsNumber(row.unitsSold90Days)}</td><td>{analyticsNumber(row.availableStock)}</td><td>{row.severity}</td></tr>)}</tbody></table></div> : <p className="analytics-empty compact">No variants currently meet the demand-to-stock alert threshold.</p>}</>}
+    {view === 'best' && (report.bestPerformingProducts.length ? <div className="table-scroll"><table><thead><tr><th>PRODUCT</th><th>CONFIRMED UNITS</th><th>ITEM REVENUE</th></tr></thead><tbody>{report.bestPerformingProducts.map(row => <tr key={row.productId}><td>{row.product ? <Link className="analytics-product-link" to={`/products?q=${encodeURIComponent(row.product.name)}`}>{row.product.name}</Link> : 'Unavailable product'}</td><td>{analyticsNumber(row.unitsPurchased)}</td><td>{analyticsMoney(row.revenue)}</td></tr>)}</tbody></table></div> : <div className="analytics-empty compact">No paid-and-delivered product sales in this period.</div>)}
+  </section>
+}
+
+function AnalyticsVariantTable({ title, rows }: { title: string; rows: AnalyticsOverviewData['advanced']['variantSizes'] }) {
+  const [sortBy, setSortBy] = useState<'views' | 'purchases'>('views')
+  const rankedRows = [...rows].sort((a, b) => sortBy === 'views' ? b.selectedVisitors - a.selectedVisitors : b.unitsPurchased - a.unitsPurchased)
+  return <section className="panel analytics-panel"><div className="panel-heading"><div><h2>{title}</h2></div><div className="analytics-variant-switch"><button type="button" aria-pressed={sortBy === 'views'} onClick={() => setSortBy('views')}>Most viewed</button><button type="button" aria-pressed={sortBy === 'purchases'} onClick={() => setSortBy('purchases')}>Most purchased</button></div></div>{rankedRows.length ? <div className="table-scroll"><table><thead><tr><th>VARIANT</th><th>SELECTED VISITORS</th><th>UNITS PURCHASED</th><th>CONVERSION</th><th>AVAILABLE STOCK</th></tr></thead><tbody>{rankedRows.slice(0, 8).map(row => <tr key={row.value}><td>{row.value}</td><td>{analyticsNumber(row.selectedVisitors)}</td><td>{analyticsNumber(row.unitsPurchased)}</td><td>{analyticsPercent(row.conversionRate)}</td><td>{analyticsNumber(row.availableStock)}</td></tr>)}</tbody></table></div> : <div className="analytics-empty compact">No variant selections recorded.</div>}</section>
+}
+
+function AnalyticsVariantDetail({ rows }: { rows: AnalyticsOverviewData['advanced']['variants'] }) {
+  return <section className="panel analytics-panel analytics-advanced-panel"><div className="panel-heading"><div><h2>Variant Conversion & Stock</h2><p>Size/color selections are joined to order line items; stock is current active inventory.</p></div></div>{rows.length ? <div className="table-scroll"><table><thead><tr><th>PRODUCT</th><th>COLOR</th><th>SIZE</th><th>SELECTED VISITORS</th><th>UNITS PURCHASED</th><th>CONVERSION</th><th>STOCK</th></tr></thead><tbody>{rows.slice(0, 12).map(row => <tr key={`${row.productId}-${row.color}-${row.size}`}><td>{row.productName}</td><td>{row.color || '—'}</td><td>{row.size || '—'}</td><td>{analyticsNumber(row.selectedVisitors)}</td><td>{analyticsNumber(row.unitsPurchased)}</td><td>{analyticsPercent(row.conversionRate)}</td><td>{analyticsNumber(row.availableStock)}</td></tr>)}</tbody></table></div> : <div className="analytics-empty compact">No size/color selections or confirmed variant purchases are available.</div>}</section>
+}
+
+function AnalyticsCollectionPerformance({ rows }: { rows: AnalyticsOverviewData['advanced']['collectionPerformance'] }) {
+  return <section className="panel analytics-panel analytics-advanced-panel"><div className="panel-heading"><div><h2>Collection Performance</h2><p>Purchases are attributed to the last consented collection-product click before order placement.</p></div></div>{rows.length ? <div className="table-scroll"><table><thead><tr><th>COLLECTION</th><th>VIEWS</th><th>PRODUCT CLICK VISITORS</th><th>PURCHASING VISITORS</th><th>CONVERSION</th><th>ATTRIBUTED REVENUE</th></tr></thead><tbody>{rows.slice(0, 10).map(row => <tr key={row.collectionId}><td>{row.collection?.name ?? 'Unavailable collection'}</td><td>{analyticsNumber(row.views)}</td><td>{analyticsNumber(row.productClickVisitors)}</td><td>{analyticsNumber(row.purchasingVisitors)}</td><td>{analyticsPercent(row.conversionRate)}</td><td>{analyticsMoney(row.revenue)}</td></tr>)}</tbody></table></div> : <div className="analytics-empty compact">Collection performance appears once collection clicks and attributed confirmed orders are recorded.</div>}</section>
+}
+
+function AnalyticsCampaignPanel({ report }: { report: AnalyticsOverviewData['advanced']['campaigns'] }) {
+  const firstRows = report.firstTouch.slice(0, 8)
+  const lastRows = report.lastTouch.slice(0, 8)
+  return <section className="panel analytics-panel analytics-advanced-panel"><div className="panel-heading"><div><h2>Campaign Intelligence</h2><p>UTM visitors from consented campaign sessions; confirmed paid-and-delivered orders only.</p></div></div><h3>Campaign Visitors</h3>{report.visitors.length ? <div className="table-scroll"><table><thead><tr><th>SOURCE / MEDIUM / CAMPAIGN</th><th>VISITORS</th><th>SESSIONS</th></tr></thead><tbody>{report.visitors.slice(0, 8).map((row, index) => <tr key={`${row.source}-${row.medium}-${row.campaign}-${index}`}><td>{row.source} / {row.medium} / {row.campaign}</td><td>{analyticsNumber(row.visitors)}</td><td>{analyticsNumber(row.sessions)}</td></tr>)}</tbody></table></div> : <p className="analytics-empty compact">No UTM campaign visits recorded.</p>}<div className="analytics-two-column"><div><h3>First-touch campaigns</h3>{firstRows.length ? <div className="table-scroll"><table><thead><tr><th>SOURCE / MEDIUM / CAMPAIGN</th><th>CAMPAIGN VISITORS</th><th>ORDERS</th><th>REVENUE</th><th>CONVERSION</th></tr></thead><tbody>{firstRows.map((row, index) => <tr key={`${row.source}-${row.medium}-${row.campaign}-${index}`}><td>{row.source} / {row.medium} / {row.campaign}</td><td>{analyticsNumber(row.visitors)}</td><td>{analyticsNumber(row.orders)}</td><td>{analyticsMoney(row.revenue)}</td><td>{analyticsPercent(row.conversionRate)}</td></tr>)}</tbody></table></div> : <p className="analytics-empty compact">No first-touch campaign sales recorded.</p>}</div><div><h3>Last-touch campaigns</h3>{lastRows.length ? <div className="table-scroll"><table><thead><tr><th>SOURCE / MEDIUM / CAMPAIGN</th><th>CAMPAIGN VISITORS</th><th>ORDERS</th><th>REVENUE</th><th>CONVERSION</th></tr></thead><tbody>{lastRows.map((row, index) => <tr key={`${row.source}-${row.medium}-${row.campaign}-${index}`}><td>{row.source} / {row.medium} / {row.campaign}</td><td>{analyticsNumber(row.visitors)}</td><td>{analyticsNumber(row.orders)}</td><td>{analyticsMoney(row.revenue)}</td><td>{analyticsPercent(row.conversionRate)}</td></tr>)}</tbody></table></div> : <p className="analytics-empty compact">No last-touch campaign sales recorded.</p>}</div></div><p className="analytics-data-note">{report.roiAvailable ? 'ROI uses configured campaign cost records.' : 'Campaign ROI is unavailable because no campaign cost data is configured.'}</p></section>
+}
+
+function AnalyticsCustomerCohorts({ cohorts, metrics }: { cohorts: AnalyticsOverviewData['advanced']['customers']['cohorts']; metrics: AnalyticsOverviewData['advanced']['customers']['metrics'] }) {
+  return <><div className="metric-grid analytics-metrics"><article className="metric-card"><p>Average Purchase Frequency</p><strong>{metrics.averagePurchaseFrequency === null ? '—' : metrics.averagePurchaseFrequency.toFixed(2)}</strong><span>lifetime orders per verified customer</span></article><article className="metric-card"><p>Average Time Between Purchases</p><strong>{metrics.averageDaysBetweenPurchases === null ? '—' : `${metrics.averageDaysBetweenPurchases.toFixed(1)} days`}</strong><span>verified accounts with repeat purchases</span></article></div><section className="panel analytics-panel"><div className="panel-heading"><div><h2>Monthly Customer Retention Cohorts</h2><p>Only authenticated customer accounts with paid-and-delivered orders; cohorts begin with first completed purchase.</p></div></div>{cohorts.length ? <div className="table-scroll"><table><thead><tr><th>COHORT</th><th>NEW CUSTOMERS</th>{Array.from({ length: 12 }, (_, index) => <th key={index}>MONTH {index}</th>)}</tr></thead><tbody>{cohorts.map(row => <tr key={row.cohort}><td>{row.cohort}</td><td>{analyticsNumber(row.customers)}</td>{Array.from({ length: 12 }, (_, index) => <td key={index}>{analyticsPercent(row.months[index]?.retentionRate ?? null)}</td>)}</tr>)}</tbody></table></div> : <div className="analytics-empty">No verified customer cohort starts in the selected date range.</div>}</section></>
+}
+
+function AnalyticsInsightPanel({ insights }: { insights: AnalyticsOverviewData['advanced']['insights'] }) {
+  return <section className="panel analytics-insights analytics-insight-cards"><div className="panel-heading"><div><h2>Automated Business Insights</h2><p>Rule-based observations supported by recorded data</p></div></div>{insights.length ? insights.slice(0, 5).map((insight, index) => <article className={`analytics-insight-card severity-${insight.severity}`} key={`${insight.title}-${index}`}><div><b>{insight.title}</b><span>{insight.severity}</span></div><p>{insight.description}</p><small>Comparison: {insight.comparisonPeriod}</small><dl>{Object.entries(insight.metrics).map(([label, value]) => <div key={label}><dt>{label.replace(/([A-Z])/g, ' $1')}</dt><dd>{typeof value === 'number' ? analyticsNumber(value) : value ?? '—'}</dd></div>)}</dl><p className="analytics-insight-action"><b>Recommended:</b> {insight.recommendedAction}</p></article>) : <div className="analytics-empty compact">Insights will appear when recorded data meets the evidence thresholds.</div>}</section>
+}
+
+function AnalyticsSourceRows({ sources, max }: { sources: AnalyticsOverviewData['sources']; max: number }) {
+  return sources.length ? <div className="analytics-source-list">{sources.map(source => <div className="analytics-source-row" key={source._id}><b>{source._id || 'Direct'}</b><div className="analytics-funnel-track"><i style={{ width: `${source.sessions / max * 100}%` }} /></div><span>{analyticsNumber(source.sessions)} sessions</span><small>{analyticsNumber(source.visitors)} visitors</small></div>)}</div> : <div className="analytics-empty">No traffic source data recorded for this period.</div>
+}
+
+function AnalyticsAttributionPanel({ title, rows }: { title: string; rows: AnalyticsOverviewData['attribution']['firstTouch'] }) {
+  return <section className="panel analytics-panel"><div className="panel-heading"><div><h2>{title}</h2><p>Confirmed paid and delivered orders</p></div></div>{rows.length ? rows.map(row => <div className="analytics-source-row analytics-attribution-row" key={row._id}><b>{row._id}</b><span>{analyticsNumber(row.orders)} orders</span><strong>{analyticsMoney(row.revenue)}</strong></div>) : <div className="analytics-empty">No attributed completed orders yet.</div>}</section>
+}
+
+function AnalyticsDemandPanel({ title, demand, stock }: { title: string; demand: { _id: string; unitsSold: number }[]; stock: { _id: string; unitsInStock: number }[] }) {
+  const entries = new Map<string, { sold: number; stock: number }>()
+  demand.forEach(row => entries.set(row._id, { sold: row.unitsSold, stock: 0 }))
+  stock.forEach(row => entries.set(row._id, { sold: entries.get(row._id)?.sold ?? 0, stock: row.unitsInStock }))
+  const rows = [...entries].sort((a, b) => b[1].sold - a[1].sold)
+  return <section className="panel analytics-panel"><div className="panel-heading"><div><h2>{title}</h2><p>Confirmed paid and delivered demand vs active stock</p></div></div>{rows.length ? rows.map(([label, amounts]) => <div className="analytics-attribution-row analytics-source-row" key={label}><b>{label}</b><span>{analyticsNumber(amounts.sold)} sold</span><strong>{analyticsNumber(amounts.stock)} in stock</strong></div>) : <div className="analytics-empty">No variant demand or active stock data available.</div>}</section>
+}
+
+function AnalyticsDailyTable({ rows }: { rows: AnalyticsOverviewData['daily'] }) {
+  const populated = rows.filter(row => row.visitors || row.sessions || row.pageViews || row.orders || row.revenue)
+  return populated.length ? <div className="table-scroll"><table><thead><tr><th>DATE</th><th>VISITORS</th><th>SESSIONS</th><th>PAGE VIEWS</th><th>ORDERS</th><th>REVENUE</th></tr></thead><tbody>{populated.map(row => <tr key={row.date}><td>{row.date}</td><td>{analyticsNumber(row.visitors)}</td><td>{analyticsNumber(row.sessions)}</td><td>{analyticsNumber(row.pageViews)}</td><td>{analyticsNumber(row.orders)}</td><td>{analyticsMoney(row.revenue)}</td></tr>)}</tbody></table></div> : <div className="analytics-empty">No activity for the selected period.</div>
+}
+
+type CookieConsentEntry = {
+  _id: string
+  visitorId: string
+  preferences: { necessary: boolean; functional: boolean; analytics: boolean; marketing: boolean }
+  action: 'accept_all' | 'reject_all' | 'custom'
+  policyVersion: string
+  createdAt: string
+}
+type CookieConsentReport = {
+  logs: CookieConsentEntry[]
+  total: number
+  page: number
+  limit: number
+  stats: { accept_all: number; reject_all: number; custom: number }
+}
+
+function CookieConsentDashboard() {
+  const [report, setReport] = useState<CookieConsentReport | null>(null)
+  const [page, setPage] = useState(1)
+  const [reload, setReload] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    apiRequest<CookieConsentReport>(`/admin/website/privacy/consents?page=${page}&limit=50`).then(result => {
+      if (!cancelled) { setReport(result); setError('') }
+    }).catch((cause: unknown) => {
+      if (!cancelled) setError(cause instanceof Error ? cause.message : 'Unable to load consent logs.')
+    }).finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [page, reload])
+  const totalPages = Math.max(1, Math.ceil((report?.total ?? 0) / 50))
+  const actionLabels = { accept_all: 'Accept All', reject_all: 'Reject All', custom: 'Custom' }
+  const preferenceText = (log: CookieConsentEntry) => [
+    'Necessary',
+    `Functional ${log.preferences.functional ? 'on' : 'off'}`,
+    `Analytics ${log.preferences.analytics ? 'on' : 'off'}`,
+    `Marketing ${log.preferences.marketing ? 'on' : 'off'}`,
+  ].join(' · ')
+  return <div className="admin-content">
+    <PageHeader eyebrow="SETTINGS / PRIVACY" title="Privacy & Cookies" action={<button className="admin-button" type="button" onClick={() => setReload(value => value + 1)}>Refresh</button>} />
+    <p className="cookie-admin-intro">Consent history is stored without names, email addresses, or IP addresses. Each saved preference change creates a separate record.</p>
+    {error && <div className="admin-alert" role="alert">{error}</div>}
+    <div className="metric-grid cookie-consent-metrics">
+      {([
+        ['Accept All', report?.stats.accept_all],
+        ['Reject All', report?.stats.reject_all],
+        ['Custom', report?.stats.custom],
+      ] as const).map(([label, count]) => <article className="metric-card" key={label}><p>{label}</p><strong>{count ?? '—'}</strong><span>all recorded changes</span></article>)}
+    </div>
+    <section className="panel cookie-consent-panel">
+      <div className="panel-heading"><div><h2>Consent logs</h2><p>{report ? `${report.total} recorded changes` : 'Visitor choices and accepted policy versions'}</p></div></div>
+      {loading ? <div className="table-empty">Loading consent logs…</div> : report?.logs.length ? <div className="table-scroll"><table className="cookie-consent-table"><thead><tr><th>DATE / TIME</th><th>VISITOR ID</th><th>ACTION</th><th>PREFERENCES</th><th>POLICY</th></tr></thead><tbody>{report.logs.map(log => <tr key={log._id}><td>{new Date(log.createdAt).toLocaleString()}</td><td title={log.visitorId}><code>{log.visitorId.slice(0, 8)}…</code></td><td>{actionLabels[log.action]}</td><td>{preferenceText(log)}</td><td>{log.policyVersion}</td></tr>)}</tbody></table></div> : <div className="table-empty">No cookie consent changes have been recorded yet.</div>}
+      <div className="table-footer"><span>Page <b>{page}</b> of <b>{totalPages}</b></span><div className="admin-pagination"><button type="button" aria-label="Previous page" disabled={page <= 1 || loading} onClick={() => setPage(current => Math.max(1, current - 1))}><ChevronLeft size={14} /></button><button type="button" aria-label="Next page" disabled={page >= totalPages || loading} onClick={() => setPage(current => Math.min(totalPages, current + 1))}><ChevronRight size={14} /></button></div></div>
+    </section>
+  </div>
 }
 
 const websitePath = '/admin/website'

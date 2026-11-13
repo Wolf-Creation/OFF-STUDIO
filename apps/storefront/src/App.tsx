@@ -1,12 +1,18 @@
-import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type WheelEvent as ReactWheelEvent } from 'react'
+import { createContext, Fragment, forwardRef, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type WheelEvent as ReactWheelEvent } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ClerkProvider, useAuth, useUser } from '@clerk/react'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, Heart, Instagram, LoaderCircle, Menu, Minus, Plus, Search, ShoppingBag, UserRound, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown, Heart, Instagram, LoaderCircle, Menu, Minus, Plus, Search, ShoppingBag, UserRound, X } from 'lucide-react'
 import type { ApiCategory, ApiProduct, ApiResponse, CashOnDeliveryOrderRequest, CashOnDeliveryOrderResponse, ProductVariant, StoreCollection, StoreContent } from '@off/shared-types'
 import { TUNISIA_LOCATIONS } from '@off/shared-types/tunisia-locations'
 import { CustomerAccountExperience } from './CustomerAccountExperience'
 import { AnimatedLogo2 } from './AnimatedLogo2'
+import { CookieConsentManager } from './CookieConsent'
+import { getAnalyticsAttribution, initializeCtaTracking, trackAnalyticsEvent, trackAnalyticsPage } from './Analytics'
+import { SocialLanding } from './SocialLanding'
+import './Checkout.css'
+import './Footer.css'
+import './MegaMenu.css'
 
 export type Product = { id: string; slug: string; name: string; price: number; category: string; color: string; image: string; gallery: string[]; heroImage?: string; secondary: string; sizes: string[]; variants: ProductVariant[]; createdAt?: string; isNew?: boolean }
 type SelectionCardSettings = { title: string; description: string; productId: string; collectionId: string; background: string; destination: string }
@@ -110,6 +116,7 @@ const defaultContent: StoreContent = {
   campaignTitle: 'Made for the everyday.',
   freeShippingThreshold: 500,
   supportEmail: '',
+  onlinePaymentEnabled: false,
 }
 const publicMediaUrl = (url: string) => url.startsWith('/') ? `${API_BASE_URL.replace(/\/api\/v1$/, '')}${url}` : url
 const CatalogContext = createContext<CatalogState | null>(null)
@@ -119,6 +126,7 @@ const GUEST_WISHLIST_STORAGE_KEY = 'off-guest-wishlist'
 const photo = (id: string, width = 900) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${width}&q=85`
 const formatTnd = (value: number) => `${new Intl.NumberFormat('fr-TN', { maximumFractionDigits: 3 }).format(value)} TND`
 const colorStyle = (variantColor: string) => /white|stone|sand|cream/i.test(variantColor) ? '#d8d1c6' : /blue/i.test(variantColor) ? '#66788b' : /olive|green/i.test(variantColor) ? '#7d8078' : '#171717'
+const collectionRouteSlug = (label: string) => label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 function applyCheckoutAddress(form: CheckoutFormValues, address: CheckoutSavedAddress): CheckoutFormValues {
   const [firstName = '', ...lastNameParts] = address.fullName.trim().split(/\s+/)
@@ -225,17 +233,178 @@ function StoreDestinationLink({ to, className, children }: { to: string; classNa
   return /^https:\/\//i.test(to) ? <a className={className} href={to} target="_blank" rel="noreferrer">{children}</a> : <Link className={className} to={to}>{children}</Link>
 }
 
+type MegaMenuPanel = 'shop' | 'collections'
+type MegaMenuProps = {
+  panel: MegaMenuPanel
+  top: number
+  products: Product[]
+  categories: Category[]
+  collections: StoreCollection[]
+  close: () => void
+  onMouseEnter: () => void
+  onMouseLeave: () => void
+}
+const menuCategories = [
+  { label: 'Outerwear', match: /outerwear|jacket|coat/i },
+  { label: 'Denim', match: /denim|jeans/i },
+  { label: 'T-shirts', match: /t[\s-]?shirts?|tees/i },
+  { label: 'Caps & accessories', match: /accessor|caps?|hats?/i },
+]
+const menuCollections = [
+  { name: 'Menswear', description: 'Considered pieces for him.', match: /menswear|mens\b|men's|ready-to-wear|outerwear/i },
+  { name: 'Womenswear', description: 'Considered pieces for her.', match: /womenswear|women/i },
+  { name: 'Accessories', description: 'Caps, bags and small objects.', match: /accessor|footwear|caps?/i },
+]
+const normalizedMenuName = (value: string) => value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+
+function getMenuCategoryData(products: Product[], categories: Category[]) {
+  return menuCategories.map((entry) => {
+    const category = categories.find(item => entry.match.test(item.name))
+      ?? categories.find(item => products.some(product => entry.match.test(product.category) && normalizedMenuName(product.category) === normalizedMenuName(item.name)))
+    const matchingProducts = products.filter(product => category
+      ? normalizedMenuName(product.category) === normalizedMenuName(category.name)
+      : entry.match.test(`${product.category} ${product.name}`))
+    const categoryName = category?.name ?? matchingProducts[0]?.category ?? entry.label
+    return { ...entry, categoryName, count: category?.productCount ?? matchingProducts.length, href: `/shop?category=${encodeURIComponent(categoryName)}` }
+  })
+}
+
+function getMenuCollectionData(products: Product[], categories: Category[], collections: StoreCollection[]) {
+  return menuCollections.map((entry) => {
+    const collection = collections.find(item => entry.match.test(`${item.name} ${item.slug}`))
+    const category = collection ? undefined : categories.find(item => entry.match.test(`${item.name} ${item.slug}`))
+    const matchingProducts = collection
+      ? products.filter(product => collection.productIds.includes(product.id))
+      : products.filter(product => category
+        ? normalizedMenuName(product.category) === normalizedMenuName(category.name)
+        : entry.match.test(product.category))
+    const href = collection
+      ? `/shop?collection=${encodeURIComponent(collection.slug)}`
+      : `/shop?category=${encodeURIComponent(category?.name ?? (matchingProducts[0]?.category || entry.name))}`
+    return { ...entry, count: collection?.productCount ?? category?.productCount ?? matchingProducts.length, href }
+  })
+}
+
+function MenuProductCard({ product, tone = 'stone', collectionLabel }: { product: Product; tone?: 'stone' | 'sand'; collectionLabel?: string }) {
+  return <Link className={`mega-product-card is-${tone}`} to={`/product/${product.slug || product.id}`}>
+    <span className="mega-product-image"><img src={product.image} alt={product.name} loading="lazy" /></span>
+    <span className="mega-product-meta">
+      <span>{collectionLabel && <small>{collectionLabel}</small>}<strong>{product.name}</strong></span>
+      <span>{formatTnd(product.price)}</span>
+    </span>
+  </Link>
+}
+
+function ShopMenuLinks({ products, categories, close }: { products: Product[]; categories: Category[]; close: () => void }) {
+  const categoryData = getMenuCategoryData(products, categories)
+  return <>
+    <Link to="/shop" onClick={close}><em>Shop all</em></Link>
+    <Link to="/shop?sort=newest" onClick={close}>New arrivals</Link>
+    <Link to="/shop?sort=featured" onClick={close}>Best sellers</Link>
+    <Link to="/shop" onClick={close}>Last pieces</Link>
+    <div className="mega-mobile-category-links">{categoryData.map(item => <Link key={item.label} to={item.href} onClick={close}>{item.label}<span>{item.count}</span></Link>)}</div>
+  </>
+}
+
+function CollectionMenuLinks({ products, categories, collections, close }: { products: Product[]; categories: Category[]; collections: StoreCollection[]; close: () => void }) {
+  return <>{getMenuCollectionData(products, categories, collections).map((item, index) => <Link className="mega-collection-link" key={item.name} to={item.href} onClick={close}><span className="mega-collection-index">{String(index + 1).padStart(2, '0')}</span><span>{item.name}<small>{item.description} · {item.count} pieces</small></span><ArrowRight size={16} aria-hidden="true" /></Link>)}</>
+}
+
+const MegaMenu = forwardRef<HTMLDivElement, MegaMenuProps>(function MegaMenu({ panel, top, products, categories, collections, close, onMouseEnter, onMouseLeave }, ref) {
+  const latestProducts = [...products].sort((a, b) => (Date.parse(b.createdAt ?? '') || 0) - (Date.parse(a.createdAt ?? '') || 0)).slice(0, 2)
+  const jacket = products.find(product => /jacket|coat|outerwear/i.test(`${product.name} ${product.category}`))
+  const accessory = products.find(product => /cap|accessor|hat/i.test(`${product.name} ${product.category}`))
+  const collectionData = getMenuCollectionData(products, categories, collections)
+  return <>
+    <div className="mega-menu-backdrop" aria-hidden="true" onClick={close} style={{ '--mega-menu-top': `${top}px` } as CSSProperties} />
+    <div className={`mega-menu-panel is-${panel}`} id="store-mega-menu" ref={ref} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={{ '--mega-menu-top': `${top}px` } as CSSProperties}>
+      <div className="mega-menu-content">
+        {panel === 'shop' ? <>
+          <section className="mega-menu-column">
+            <h2>Shop</h2>
+            <div className="mega-menu-list">
+              <Link to="/shop" onClick={close}><em>Shop all</em></Link>
+              <Link to="/shop?sort=newest" onClick={close}>New arrivals</Link>
+              <Link to="/shop?sort=featured" onClick={close}>Best sellers</Link>
+              <Link to="/shop" onClick={close}>Last pieces</Link>
+            </div>
+          </section>
+          <section className="mega-menu-column">
+            <h2>By category</h2>
+            <div className="mega-menu-list mega-category-list">{getMenuCategoryData(products, categories).map(item => <Link key={item.label} to={item.href} onClick={close}>{item.label}<span>{item.count}</span></Link>)}</div>
+          </section>
+          <section className="mega-menu-column mega-latest-column">
+            <div className="mega-menu-column-title"><h2>The latest edit</h2><Link to="/shop?sort=newest" onClick={close}>Shop all <ArrowRight size={13} /></Link></div>
+            {latestProducts.length ? <div className="mega-product-grid">{latestProducts.map((product, index) => <MenuProductCard key={product.id} product={product} tone={index ? 'sand' : 'stone'} />)}</div> : <p className="mega-menu-empty">New pieces are on their way.</p>}
+          </section>
+        </> : <>
+          <section className="mega-menu-column mega-collections-column">
+            <h2>Collections</h2>
+            <div className="mega-collection-list">{collectionData.map((item, index) => <Link className="mega-collection-link" key={item.name} to={item.href} onClick={close}>
+              <span className="mega-collection-index">{String(index + 1).padStart(2, '0')}</span>
+              <span className="mega-collection-copy"><span>{item.name === 'Menswear' ? <>Mens<em>wear</em></> : item.name === 'Womenswear' ? <>Womens<em>wear</em></> : item.name}</span><small>{item.description} · {item.count} pieces</small></span>
+              <ArrowRight size={16} aria-hidden="true" />
+            </Link>)}</div>
+          </section>
+          <section className="mega-menu-column mega-feature-column">
+            <h2>Featured</h2>
+            {jacket ? <MenuProductCard product={jacket} tone="stone" collectionLabel="Menswear" /> : <p className="mega-menu-empty">No featured outerwear yet.</p>}
+          </section>
+          <section className="mega-menu-column mega-feature-column mega-feature-column-last">
+            <h2>Featured</h2>
+            {accessory ? <MenuProductCard product={accessory} tone="sand" collectionLabel="Accessories" /> : <p className="mega-menu-empty">No featured accessories yet.</p>}
+          </section>
+        </>}
+      </div>
+    </div>
+  </>
+})
+
+function MobileMegaMenuLinks({ panel, products, categories, collections, close }: { panel: MegaMenuPanel; products: Product[]; categories: Category[]; collections: StoreCollection[]; close: () => void }) {
+  return panel === 'shop'
+    ? <ShopMenuLinks products={products} categories={categories} close={close} />
+    : <CollectionMenuLinks products={products} categories={categories} collections={collections} close={close} />
+}
+
 function Header({ bagCount, onOpenCart }: { bagCount: number; onOpenCart: () => void }) {
-  const { content, navigation, websiteSettings, products } = useCatalog()
+  const { content, navigation, websiteSettings, products, categories, collections } = useCatalog()
   const [open, setOpen] = useState(false)
+  const [activeMegaMenu, setActiveMegaMenu] = useState<'shop' | 'collections' | null>(null)
+  const [megaMenuTop, setMegaMenuTop] = useState(112)
+  const [mobileExpandedMenu, setMobileExpandedMenu] = useState<'shop' | 'collections' | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [clockTime, setClockTime] = useState(() => new Date())
   const location = useLocation()
   const navigate = useNavigate()
+  const headerRef = useRef<HTMLElement>(null)
+  const megaMenuRef = useRef<HTMLDivElement>(null)
+  const openTimerRef = useRef<number | null>(null)
+  const closeTimerRef = useRef<number | null>(null)
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase()
   const searchResults = normalizedSearch ? products.filter(product => [product.name, product.category, product.color, product.slug, ...product.sizes].join(' ').toLocaleLowerCase().includes(normalizedSearch)) : []
-  const navItems = navigation?.headerItems.filter(item => item.enabled) ?? [['Shop all', '/shop', true], ['Collections', '/collections', true], ['About OFF', '/about', true], ['Contact', '/about', true]].map(([label, destination, enabled]) => ({ label: String(label), destination: String(destination), enabled: Boolean(enabled) }))
+  const allowedHeaderDestinations = new Set(['/', '/shop', '/collections', '/about', '/contact'])
+  const defaultHeaderItems = [
+    { label: 'Shop all', destination: '/shop', enabled: true },
+    { label: 'Collections', destination: '/collections', enabled: true },
+    { label: 'About OFF', destination: '/about', enabled: true },
+    { label: 'Contact', destination: '/contact', enabled: true },
+  ]
+  const navItems = [...(navigation?.headerItems ?? defaultHeaderItems)]
+    .map((item) => {
+      const rawDestination = String(item?.destination ?? '').trim()
+      const sanitizedDestination = rawDestination === '/home' ? '/' : rawDestination
+      const normalizedDestination = sanitizedDestination === '' ? '/' : sanitizedDestination
+      if (!allowedHeaderDestinations.has(normalizedDestination)) return null
+      if (normalizedDestination === '/') return { label: 'Home', destination: '/', enabled: true }
+      if (normalizedDestination === '/shop') return { label: 'Shop all', destination: '/shop', enabled: true }
+      if (normalizedDestination === '/collections') return { label: 'Collections', destination: '/collections', enabled: true }
+      if (normalizedDestination === '/contact') return { label: 'Contact', destination: '/contact', enabled: true }
+      return { label: 'About OFF', destination: '/about', enabled: true }
+    })
+    .filter((item): item is { label: string; destination: string; enabled: boolean } => Boolean(item))
+    .filter((item, index, items) => items.findIndex(current => current.destination === item.destination) === index)
+  if (!navItems.some(item => item.destination === '/contact')) navItems.push({ label: 'Contact', destination: '/contact', enabled: true })
   const announcementPalette: Record<string, { background: string; color: string }> = { dark: { background: '#171918', color: '#fff' }, sage: { background: '#eaf2ec', color: '#304638' }, sand: { background: '#e9e1d5', color: '#39352e' }, white: { background: '#fff', color: '#171918' } }
   const announcementSource = typeof websiteSettings.announcement === 'string' ? websiteSettings.announcement : content.announcement
   const announcementMessages = (content.advertisementMessages?.length ? content.advertisementMessages : [announcementSource]).filter(Boolean)
@@ -258,7 +427,64 @@ function Header({ bagCount, onOpenCart }: { bagCount: number; onOpenCart: () => 
       <span className="store-announcement-clock-period">{announcementPeriod}</span>
     </time>
   </div>
-  useEffect(() => { setOpen(false); setSearchOpen(false); setSearchQuery('') }, [location.pathname])
+  useEffect(() => {
+    setOpen(false)
+    setSearchOpen(false)
+    setSearchQuery('')
+    setActiveMegaMenu(null)
+    setMobileExpandedMenu(null)
+  }, [location.pathname])
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node) || headerRef.current?.contains(target) || megaMenuRef.current?.contains(target)) return
+      setActiveMegaMenu(null)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActiveMegaMenu(null)
+        setOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+      if (openTimerRef.current !== null) window.clearTimeout(openTimerRef.current)
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current)
+    }
+  }, [])
+  const clearMegaMenuTimers = () => {
+    if (openTimerRef.current !== null) window.clearTimeout(openTimerRef.current)
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current)
+  }
+  const scheduleMegaMenuOpen = (panel: 'shop' | 'collections') => {
+    clearMegaMenuTimers()
+    openTimerRef.current = window.setTimeout(() => {
+      setMegaMenuTop(headerRef.current?.getBoundingClientRect().bottom ?? 112)
+      setActiveMegaMenu(panel)
+    }, 80)
+  }
+  const scheduleMegaMenuClose = () => {
+    if (openTimerRef.current !== null) window.clearTimeout(openTimerRef.current)
+    closeTimerRef.current = window.setTimeout(() => setActiveMegaMenu(null), 150)
+  }
+  const toggleMegaMenu = (panel: 'shop' | 'collections') => {
+    clearMegaMenuTimers()
+    if (activeMegaMenu !== panel) setMegaMenuTop(headerRef.current?.getBoundingClientRect().bottom ?? 112)
+    setActiveMegaMenu(current => current === panel ? null : panel)
+  }
+  useEffect(() => {
+    if (!activeMegaMenu) return
+    const updateMenuTop = () => setMegaMenuTop(headerRef.current?.getBoundingClientRect().bottom ?? 112)
+    window.addEventListener('scroll', updateMenuTop, { passive: true })
+    window.addEventListener('resize', updateMenuTop)
+    return () => {
+      window.removeEventListener('scroll', updateMenuTop)
+      window.removeEventListener('resize', updateMenuTop)
+    }
+  }, [activeMegaMenu])
   useEffect(() => {
     const timer = window.setInterval(() => setClockTime(new Date()), 60_000)
     return () => window.clearInterval(timer)
@@ -290,13 +516,37 @@ function Header({ bagCount, onOpenCart }: { bagCount: number; onOpenCart: () => 
   }, [announcementVisible])
   return <>
     {announcementVisible && (announcementDestination && /^https:\/\//i.test(announcementDestination) ? <a className="store-announcement-link" href={announcementDestination} target="_blank" rel="noreferrer">{announcementTicker}</a> : announcementDestination ? <Link className="store-announcement-link" to={announcementDestination}>{announcementTicker}</Link> : announcementTicker)}
-    <header className="store-header" style={{ '--off-logo-size': `${Math.min(32, Math.max(18, Number(websiteSettings.logoSize ?? 22)))}px` } as CSSProperties}>
+    <header className={`store-header${activeMegaMenu ? ' has-mega-menu' : ''}`} ref={headerRef} onMouseEnter={clearMegaMenuTimers} onMouseLeave={scheduleMegaMenuClose} style={{ '--off-logo-size': `${Math.min(32, Math.max(18, Number(websiteSettings.logoSize ?? 22)))}px` } as CSSProperties}>
       <button className="icon-button header-menu-toggle" aria-label="Open navigation" onClick={() => setOpen(true)}><Menu size={17} strokeWidth={1.5} /></button>
       <Link className="store-header-logo-link" to="/" aria-label="OFF home"><AnimatedLogo2 className="store-header-logo-motion" loop /></Link>
       <nav className="header-navigation" aria-label="Main navigation">
-        {navItems.map(({ label, destination }) => /^https:\/\//i.test(destination)
-          ? <a key={`${label}-${destination}`} href={destination} target="_blank" rel="noreferrer">{label}</a>
-          : <NavLink key={`${label}-${destination}`} to={destination}>{label}</NavLink>)}
+        {navItems.map(({ label, destination }) => {
+          if (destination === '/shop' || destination === '/collections') {
+            const panel = destination === '/shop' ? 'shop' : 'collections'
+            const expanded = activeMegaMenu === panel
+            return <button
+              className={`header-mega-trigger${expanded ? ' active' : ''}`}
+              type="button"
+              key={`${label}-${destination}`}
+              aria-expanded={expanded}
+              aria-controls="store-mega-menu"
+              onMouseEnter={() => scheduleMegaMenuOpen(panel)}
+              onFocus={() => scheduleMegaMenuOpen(panel)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  clearMegaMenuTimers()
+                  setMegaMenuTop(headerRef.current?.getBoundingClientRect().bottom ?? 112)
+                  setActiveMegaMenu(panel)
+                }
+              }}
+              onClick={() => toggleMegaMenu(panel)}
+            >{label}<ChevronDown size={12} strokeWidth={1.6} aria-hidden="true" /></button>
+          }
+          return /^https:\/\//i.test(destination)
+            ? <a key={`${label}-${destination}`} href={destination} target="_blank" rel="noreferrer">{label}</a>
+            : <NavLink key={`${label}-${destination}`} to={destination}>{label}</NavLink>
+        })}
       </nav>
       <div className="header-actions">
         {websiteSettings.showSearch !== false && <button className="icon-button" aria-label="Search" onClick={() => setSearchOpen(!searchOpen)}><Search size={16} strokeWidth={1.5} /></button>}
@@ -305,12 +555,37 @@ function Header({ bagCount, onOpenCart }: { bagCount: number; onOpenCart: () => 
         {websiteSettings.showAccount !== false && <Link className="icon-button account-link header-account-link" aria-label="Account" to="/account"><UserRound size={16} strokeWidth={1.4} /></Link>}
       </div>
     </header>
-    {searchOpen && <div className="search-strip-wrap"><form className="search-strip" onSubmit={event => { event.preventDefault(); if (normalizedSearch) navigate(`/shop?q=${encodeURIComponent(searchQuery.trim())}`) }}><Search size={16} /><input name="q" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search products" autoFocus aria-label="Search existing products" aria-controls="header-search-results" /><button aria-label="Close search" type="button" onClick={() => { setSearchOpen(false); setSearchQuery('') }}><X size={16} /></button></form>{searchQuery.trim() && <div className="search-results" id="header-search-results" role="listbox" aria-label="Matching products">{searchResults.length ? searchResults.map(product => <Link className="search-result-item" key={product.id} role="option" aria-selected="false" to={`/product/${product.id}`} onClick={() => setSearchOpen(false)}><span><strong>{product.name}</strong><small>{product.category} · {formatTnd(product.price)}</small></span><img src={product.image} alt="" loading="lazy" /></Link>) : <p className="search-results-empty">No products match “{searchQuery.trim()}”.</p>}</div>}</div>}
+    {searchOpen && <div className="search-strip-wrap"><form className="search-strip" onSubmit={event => { event.preventDefault(); if (normalizedSearch) { const term = searchQuery.trim(); if (!/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i.test(term) && !/\+?\d[\d\s()-]{6,}\d/.test(term)) trackAnalyticsEvent({ type: 'search', searchTerm: term, searchResults: searchResults.length }); navigate(`/shop?q=${encodeURIComponent(term)}`) } }}><Search size={16} /><input name="q" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search products" autoFocus aria-label="Search existing products" aria-controls="header-search-results" /><button aria-label="Close search" type="button" onClick={() => { setSearchOpen(false); setSearchQuery('') }}><X size={16} /></button></form>{searchQuery.trim() && <div className="search-results" id="header-search-results" role="listbox" aria-label="Matching products">{searchResults.length ? searchResults.map(product => <Link className="search-result-item" key={product.id} role="option" aria-selected="false" to={`/product/${product.id}`} onClick={() => setSearchOpen(false)}><span><strong>{product.name}</strong><small>{product.category} · {formatTnd(product.price)}</small></span><img src={product.image} alt="" loading="lazy" /></Link>) : <p className="search-results-empty">No products match “{searchQuery.trim()}”.</p>}</div>}</div>}
+    {activeMegaMenu && <MegaMenu
+      ref={megaMenuRef}
+      panel={activeMegaMenu}
+      top={megaMenuTop}
+      products={products}
+      categories={categories}
+      collections={collections}
+      close={() => setActiveMegaMenu(null)}
+      onMouseEnter={clearMegaMenuTimers}
+      onMouseLeave={scheduleMegaMenuClose}
+    />}
     {open && <div className="drawer-backdrop" onClick={() => setOpen(false)}>
       <nav className="nav-drawer" aria-label="Main navigation" onClick={event => event.stopPropagation()}>
         <button className="drawer-close" aria-label="Close navigation" onClick={() => setOpen(false)}><X size={19} /></button>
         <Logo />
-        <div className="drawer-links">{navItems.map(({ label, destination }) => /^https:\/\//i.test(destination) ? <a key={`${label}-${destination}`} href={destination} target="_blank" rel="noreferrer">{label}<ArrowRight size={15} /></a> : <NavLink key={`${label}-${destination}`} to={destination}>{label}<ArrowRight size={15} /></NavLink>)}</div>
+        <div className="drawer-links">{navItems.map(({ label, destination }) => {
+          if (destination === '/shop' || destination === '/collections') {
+            const panel = destination === '/shop' ? 'shop' : 'collections'
+            const expanded = mobileExpandedMenu === panel
+            return <section className="drawer-menu-section" key={`${label}-${destination}`}>
+              <button type="button" className="drawer-menu-toggle" aria-expanded={expanded} aria-controls={`drawer-${panel}-links`} onClick={() => setMobileExpandedMenu(current => current === panel ? null : panel)}>{label}<ChevronDown size={16} aria-hidden="true" /></button>
+              {expanded && <div className="drawer-menu-submenu" id={`drawer-${panel}-links`}>
+                <MobileMegaMenuLinks panel={panel} products={products} categories={categories} collections={collections} close={() => setOpen(false)} />
+              </div>}
+            </section>
+          }
+          return /^https:\/\//i.test(destination)
+            ? <a key={`${label}-${destination}`} href={destination} target="_blank" rel="noreferrer">{label}<ArrowRight size={15} /></a>
+            : <NavLink key={`${label}-${destination}`} to={destination}>{label}<ArrowRight size={15} /></NavLink>
+        })}</div>
         <div className="nav-drawer-utility">
           {CLERK_PUBLISHABLE_KEY && <NavDrawerGreeting />}
           {websiteSettings.showAccount !== false && <NavLink className="nav-drawer-utility-link" to="/account"><UserRound size={17} strokeWidth={1.5} /><span>Account</span></NavLink>}
@@ -338,42 +613,99 @@ function AuthenticatedWishlistHeaderLink({ className, showLabel = false }: { cla
     : <Link className={className} aria-label="Wishlist" to={destination}>{content}</Link>
 }
 
-function Footer({ announcement = '' }: { announcement?: string }) {
-  const { content, websiteSettings, navigation } = useCatalog()
-  const groups = navigation?.footerGroups.length ? navigation.footerGroups : [{
-    title: 'Explore',
-    links: [
-      { label: 'About', destination: '/about' },
-      { label: 'Contact', destination: '/about' },
-      { label: 'Privacy', destination: '/about' },
-      { label: 'Shipping & Returns', destination: '/about' },
-    ],
-  }]
-  const supportEmail = content.supportEmail || String(websiteSettings.contactEmail ?? '')
-  const socialLinks = [
-    ['Instagram', websiteSettings.instagramUrl],
-    ['Facebook', websiteSettings.facebookUrl],
-    ['TikTok', websiteSettings.tiktokUrl],
-  ].filter((item): item is [string, string] => typeof item[1] === 'string' && /^https:\/\//i.test(item[1]))
-  const marqueeWords = ['Outside the frame', 'Unordinary', 'Considered', 'Lived-in', 'Raw edge', 'Made with intention']
-  return <>
-  <section className="footer-marquee" aria-label="Outside the frame. Unordinary. Considered. Lived-in. Raw edge. Made with intention.">
-    <div className="footer-marquee-track" aria-hidden="true">
-      {[0, 1].map(copy => <div className="footer-marquee-group" key={copy}>{marqueeWords.map((word, index) => <span className={`footer-marquee-word${index % 2 ? ' is-italic' : ''}`} key={word}>{word}<i className="footer-marquee-capsule" /></span>)}</div>)}
+const manifestoWords = ['Outside the frame', 'Unordinary', 'Considered', 'Lived-in', 'Raw edge', 'Made with intention']
+
+function ManifestoBand() {
+  const wordGroup = (copy: number) => <span className="off-manifesto-group" aria-hidden={copy ? true : undefined} key={copy}>
+    {manifestoWords.map((word, index) => <span className={`off-manifesto-word${index % 2 ? ' is-outline' : ''}${index === 1 || index === 3 ? ' is-italic' : ''}`} key={word}>{word}<span className="off-manifesto-capsule" aria-hidden="true"><i /></span></span>)}
+  </span>
+  return <section className="off-manifesto" aria-label="OFF manifesto">
+    <header className="off-manifesto-heading">
+      <span className="off-manifesto-title"><i aria-hidden="true" />The OFF manifesto</span>
+      <span>Tunis · 2026</span>
+    </header>
+    <div className="off-manifesto-marquee" aria-hidden="true">
+      <div className="off-manifesto-track">{[0, 1].map(wordGroup)}</div>
     </div>
+    <span className="off-manifesto-bottom-bar" aria-hidden="true" />
   </section>
-  <footer className="store-footer">
-    <div className="footer-top">
-      <div className="footer-brand"><Logo light /><p>Considered pieces.<br />Made to be lived in.</p></div>
-      {groups.map((group, groupIndex) => <nav className="footer-link-group" aria-label={group.title || `Footer links ${groupIndex + 1}`} key={`${group.title}-${groupIndex}`}>
-        <h2>{group.title}</h2>
-        {group.links.map((item, linkIndex) => /^https:\/\//i.test(item.destination)
-          ? <a key={`${item.destination}-${linkIndex}`} href={item.destination} target="_blank" rel="noreferrer">{item.label}</a>
-          : <Link key={`${item.destination}-${linkIndex}`} to={item.destination}>{item.label}</Link>)}
-      </nav>)}
-    </div>
-    {announcement && <p className="store-footer-announcement">{announcement}</p>}<div className="footer-bottom"><span>{String(websiteSettings.copyright ?? '© 2025 OFF. All rights reserved.')}</span><div>{socialLinks.map(([label, url]) => <a key={label} href={url} target="_blank" rel="noreferrer">{label}</a>)}</div><span>{supportEmail ? <a href={`mailto:${supportEmail}`}>{supportEmail}</a> : 'Made with intention'}</span></div>
-  </footer>
+}
+
+function SocialFooterIcon({ name }: { name: 'Instagram' | 'TikTok' | 'Facebook' | 'WhatsApp' }) {
+  if (name === 'Instagram') return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.2" y="3.2" width="17.6" height="17.6" rx="5" /><circle cx="12" cy="12" r="4.1" /><circle className="off-footer-icon-fill" cx="17.7" cy="6.5" r="1" /></svg>
+  if (name === 'TikTok') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.2 3.5v11.2a4.2 4.2 0 1 1-3.1-4.1M14.2 6.1c1.1 2.2 2.8 3.4 5.3 3.6" /></svg>
+  if (name === 'Facebook') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.1 20.5v-7.7h2.6l.4-3h-3V7.9c0-.9.3-1.5 1.5-1.5h1.6V3.7c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3v1.9H7.8v3h2.7v7.7" /></svg>
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 11.6a8.2 8.2 0 0 1-12.1 7.2L3 20l1.3-4.7a8.2 8.2 0 1 1 15.9-3.7Z" /><path d="M8.3 7.9c.2-.4.4-.4.7-.4h.5c.2 0 .4 0 .5.4l.8 1.9c.1.2.1.4 0 .5l-.6.7c-.2.2-.2.4-.1.6.5.9 1.2 1.6 2.1 2.1.2.1.4.1.6-.1l.7-.8c.2-.2.4-.2.6-.1l1.8.9c.3.1.4.3.3.6-.1.6-.4 1.2-.9 1.5-.5.4-1.1.5-1.8.3-1-.3-2.3-.9-3.6-2.1-1.1-1-2-2.4-2.3-3.4-.3-.9-.1-1.8.3-2.6.1-.2.3-.4.4-.5Z" /></svg>
+}
+
+function FooterSocialLinks({ websiteSettings }: { websiteSettings: Record<string, unknown> }) {
+  const socialLinks: { name: 'Instagram' | 'TikTok' | 'Facebook' | 'WhatsApp'; href: string; label: string }[] = []
+  for (const name of ['Instagram', 'TikTok', 'Facebook'] as const) {
+    const rawUrl = websiteSettings[`${name.toLowerCase()}Url`]
+    if (typeof rawUrl !== 'string' || !rawUrl.trim()) continue
+    try {
+      const url = new URL(rawUrl)
+      if (url.protocol === 'https:' || url.protocol === 'http:') socialLinks.push({ name, href: url.toString(), label: `OFF sur ${name}` })
+    } catch {
+      continue
+    }
+  }
+  const storedNumber = String(websiteSettings.whatsappNumber ?? '')
+  const digits = storedNumber.replace(/\D/g, '')
+  if (digits) socialLinks.push({ name: 'WhatsApp', href: `https://wa.me/${digits}`, label: 'OFF sur WhatsApp' })
+  return <nav className="off-footer-social" aria-label="OFF sur les réseaux sociaux">
+    {socialLinks.map(link => <a key={link.name} href={link.href} target="_blank" rel="noopener noreferrer" aria-label={link.label}><SocialFooterIcon name={link.name} /></a>)}
+  </nav>
+}
+
+function Footer({ announcement = '', layout = false }: { announcement?: string; layout?: boolean }) {
+  const { products, categories, collections, websiteSettings } = useCatalog()
+  const collectionLinks = getMenuCollectionData(products, categories, collections)
+  const currentYear = new Date().getFullYear()
+  const helpLinks = [
+    { label: 'Shipping & Returns', to: '/faq' },
+    { label: 'Size guide', to: '/faq' },
+    { label: 'Cash on delivery', to: '/faq' },
+    { label: 'FAQ', to: '/faq' },
+    { label: 'Contact', to: '/contact' },
+  ]
+  const studioLinks = [
+    { label: 'About OFF', to: '/about' },
+    { label: 'Privacy', to: '/legal' },
+    { label: 'Terms', to: '/legal' },
+  ]
+  if (!layout) return null
+  return <>
+    <ManifestoBand />
+    <footer className="off-site-footer">
+      <div className="off-footer-inner">
+        <div className="off-footer-grid">
+          <section className="off-footer-brand" aria-label="OFF">
+            <Link className="off-footer-logo" to="/" aria-label="OFF home"><img src="/off-logo.svg" alt="" /></Link>
+            <p>Considered pieces.<br />Made to be lived in.</p>
+            <FooterSocialLinks websiteSettings={websiteSettings} />
+          </section>
+          <nav className="off-footer-link-group" aria-label="Shop">
+            <h2>Shop</h2>
+            <Link to="/shop">Shop all</Link>
+            <Link to="/shop?sort=newest">New arrivals</Link>
+            <Link to="/shop?sort=featured">Best sellers</Link>
+            <Link to="/collections">Collections</Link>
+            {collectionLinks.map(item => <Link className="off-footer-sub-link" key={item.name} to={item.href}>{item.name}</Link>)}
+          </nav>
+          <nav className="off-footer-link-group" aria-label="Help">
+            <h2>Help</h2>
+            {helpLinks.map(item => <Link key={item.label} to={item.to}>{item.label}</Link>)}
+          </nav>
+          <nav className="off-footer-link-group" aria-label="Studio">
+            <h2>Studio</h2>
+            {studioLinks.map(item => <Link key={item.label} to={item.to}>{item.label}</Link>)}
+          </nav>
+        </div>
+        {announcement && <p className="off-footer-announcement">{announcement}</p>}
+        <div className="off-footer-bottom"><span>© {currentYear} OFF. All rights reserved.</span><span>Made with intention</span></div>
+      </div>
+    </footer>
   </>
 }
 
@@ -423,19 +755,56 @@ function ProductLoadingCard() {
   </article>
 }
 
+function HomeLoadingSections() {
+  return <div className="home-loading-sections" role="status" aria-label="Loading homepage content" aria-busy="true">
+    <span className="sr-only">Loading homepage content</span>
+    <section className="section arrivals" aria-hidden="true">
+      <div className="section-heading"><span className="product-loading-line home-loading-heading" /><span className="product-loading-line home-loading-link" /></div>
+      <div className="product-grid home-grid product-loading-grid">{Array.from({ length: 3 }, (_, index) => <ProductLoadingCard key={index} />)}</div>
+    </section>
+    <section className="home-loading-editorial" aria-hidden="true">
+      <div className="product-image-loading" />
+      <div className="home-loading-copy"><span className="product-loading-line home-loading-eyebrow" /><span className="product-loading-line home-loading-title" /><span className="product-loading-line" /><span className="product-loading-line product-loading-line-short" /></div>
+    </section>
+    <section className="home-loading-tiles" aria-hidden="true">{Array.from({ length: 3 }, (_, index) => <div className="product-image-loading" key={index} />)}</section>
+    <section className="home-loading-campaign product-image-loading" aria-hidden="true" />
+  </div>
+}
+
 function ProductCard({ product, showPrice = true, liked: controlledLiked, onWishlistToggle, imageLoading = false }: { product: Product; showPrice?: boolean; liked?: boolean; onWishlistToggle?: () => void; imageLoading?: boolean }) {
   const [localLiked, setLocalLiked] = useState(false)
   const guestWishlist = useContext(GuestWishlistContext)
+  const catalog = useContext(CatalogContext)
+  const location = useLocation()
   const liked = controlledLiked ?? guestWishlist?.ids.includes(product.id) ?? localLiked
+  const trackCollectionProductClick = () => {
+    let collection: StoreCollection | undefined
+    if (location.pathname === '/shop') {
+      const requestedSlug = new URLSearchParams(location.search).get('collection')
+      collection = catalog?.collections.find(item => item.slug === requestedSlug || collectionRouteSlug(item.name) === requestedSlug)
+      if (!collection && requestedSlug && catalog) {
+        const selectedCard = getSelectionCards(
+          catalog.homeSections.find(section => section.enabled && section.type === 'featured-products')?.settings ?? {},
+          catalog.products,
+          catalog.collections,
+        ).find(card => collectionRouteSlug(card.title) === requestedSlug)
+        collection = catalog.collections.find(item => item._id === selectedCard?.collectionId)
+      }
+    } else if (location.pathname === '/collections') {
+      collection = catalog?.collections.find(item => item.productIds.includes(product.id))
+    }
+    if (collection) trackAnalyticsEvent({ type: 'collection_product_click', productId: product.id, collectionId: collection._id })
+  }
   const toggleWishlist = () => {
+    trackAnalyticsEvent({ type: liked ? 'wishlist_remove' : 'wishlist_add', productId: product.id })
     if (onWishlistToggle) onWishlistToggle()
     else if (guestWishlist) guestWishlist.toggle(product.id)
     else setLocalLiked(value => !value)
   }
   const cardImage = product.heroImage || product.image
   return <article className="product-card">
-    <Link to={`/product/${product.id}`} className={`product-image-wrap${product.heroImage ? ' has-cutout' : ''}${imageLoading ? ' product-image-loading' : ''}`}>{imageLoading ? <ProductLoadingIndicator /> : <img src={cardImage} alt={product.name} loading="lazy" />}<button className={`favorite ${liked ? 'is-liked' : ''}`} aria-label={liked ? 'Remove from wishlist' : 'Add to wishlist'} onClick={event => { event.preventDefault(); toggleWishlist() }}><Heart size={16} strokeWidth={1.4} fill={liked ? 'currentColor' : 'none'} /></button>{product.isNew && <span className="product-tag">New arrival</span>}</Link>
-    <div className="product-meta"><Link to={`/product/${product.id}`}><span>{product.name}</span>{showPrice && <span>{formatTnd(product.price)}</span>}</Link><small>{product.category} · {product.color}</small></div>
+    <Link to={`/product/${product.id}`} className={`product-image-wrap${product.heroImage ? ' has-cutout' : ''}${imageLoading ? ' product-image-loading' : ''}`} onClick={event => { if (!(event.target instanceof Element) || !event.target.closest('button')) trackCollectionProductClick() }}>{imageLoading ? <ProductLoadingIndicator /> : <img src={cardImage} alt={product.name} loading="lazy" />}<button className={`favorite ${liked ? 'is-liked' : ''}`} aria-label={liked ? 'Remove from wishlist' : 'Add to wishlist'} onClick={event => { event.preventDefault(); toggleWishlist() }}><Heart size={16} strokeWidth={1.4} fill={liked ? 'currentColor' : 'none'} /></button>{product.isNew && <span className="product-tag">New arrival</span>}</Link>
+    <div className="product-meta"><Link to={`/product/${product.id}`} onClick={trackCollectionProductClick}><span>{product.name}</span>{showPrice && <span>{formatTnd(product.price)}</span>}</Link><small>{product.category} · {product.color}</small></div>
   </article>
 }
 
@@ -445,7 +814,9 @@ function HomeSelectionCards({ cards, products, collections = [], imageLoading = 
       const product = products.find(item => item.id === card.productId)
       const collection = collections.find(item => item._id === card.collectionId)
       const fallbackImage = ['/hero-ai/leather-jacket-ai.png', '/hero-ai/distressed-denim-jeans-ai.png', '/hero-ai/ma-cap-ai.png'][index]
-      const href = card.destination || (collection ? `/shop?collection=${encodeURIComponent(collection.slug)}` : product ? `/product/${product.slug || product.id}` : '/shop')
+      const href = collection
+        ? `/shop?collection=${encodeURIComponent(collectionRouteSlug(card.title))}`
+        : card.destination || (product ? `/product/${product.slug || product.id}` : '/shop')
       const background = card.background || ['#e5e2dc', '#e5e2dc', '#d9d5cb'][index]
       const foreground = background.toLowerCase() === '#111111' ? '#fff' : '#171715'
       return <Link className="selection-card" key={`${card.title}-${index}`} to={href} style={{ '--selection-background': background, '--selection-foreground': foreground } as CSSProperties}>
@@ -550,9 +921,18 @@ function WishlistLanding() {
   return CLERK_PUBLISHABLE_KEY ? <AuthenticatedWishlistLanding /> : <GuestWishlistPage />
 }
 
+function WishlistLoadingSkeleton() {
+  return <main className="page-shell guest-wishlist-page wishlist-loading" role="status" aria-label="Loading wishlist" aria-busy="true">
+    <span className="sr-only">Loading wishlist</span>
+    <div className="breadcrumbs" aria-hidden="true"><span className="product-loading-line" /><span>/</span><span className="product-loading-line wishlist-loading-breadcrumb" /></div>
+    <div className="page-title-center" aria-hidden="true"><span className="product-loading-line wishlist-loading-eyebrow" /><span className="product-loading-line wishlist-loading-title" /></div>
+    <div className="product-grid listing-grid product-loading-grid" aria-hidden="true">{Array.from({ length: 3 }, (_, index) => <ProductLoadingCard key={index} />)}</div>
+  </main>
+}
+
 function AuthenticatedWishlistLanding() {
   const { isLoaded, isSignedIn } = useAuth()
-  if (!isLoaded) return <main className="page-shell catalog-message">Loading wishlist…</main>
+  if (!isLoaded) return <WishlistLoadingSkeleton />
   return isSignedIn ? <Navigate to="/account/wishlist" replace /> : <GuestWishlistPage />
 }
 
@@ -560,7 +940,7 @@ function GuestWishlistPage() {
   const { products, loading, error, reload } = useCatalog()
   const wishlist = useContext(GuestWishlistContext)
   const savedProducts = products.filter(product => wishlist?.ids.includes(product.id))
-  return <><main className="page-shell guest-wishlist-page"><div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><span>Wishlist</span></div><div className="page-title-center"><p className="eyebrow">SAVED FOR LATER</p><h1>YOUR WISHLIST</h1></div>{loading ? <p className="catalog-message">Loading your wishlist…</p> : error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : savedProducts.length ? <div className="product-grid listing-grid">{savedProducts.map(product => <ProductCard key={product.id} product={product} />)}</div> : <div className="empty-state"><Heart size={24} strokeWidth={1.3} /><h2>Your wishlist is waiting for something special.</h2><p>Save the pieces you love and find them here whenever you return.</p><Link className="button button-dark" to="/shop">DISCOVER THE COLLECTION <ArrowRight size={14} /></Link></div>}</main><Footer /></>
+  return <>{loading ? <WishlistLoadingSkeleton /> : <main className="page-shell guest-wishlist-page"><div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><span>Wishlist</span></div><div className="page-title-center"><p className="eyebrow">SAVED FOR LATER</p><h1>YOUR WISHLIST</h1></div>{error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : savedProducts.length ? <div className="product-grid listing-grid">{savedProducts.map(product => <ProductCard key={product.id} product={product} />)}</div> : <div className="empty-state"><Heart size={24} strokeWidth={1.3} /><h2>Your wishlist is waiting for something special.</h2><p>Save the pieces you love and find them here whenever you return.</p><Link className="button button-dark" to="/shop">DISCOVER THE COLLECTION <ArrowRight size={14} /></Link></div>}</main>}</>
 }
 
 function Home({ addToBag }: { addToBag: (id: string, size: string, color: string, sku: string, quantity?: number) => boolean }) {
@@ -1052,19 +1432,20 @@ function Home({ addToBag }: { addToBag: (id: string, size: string, color: string
       if (section.type === 'footer-announcement') return <section className="section cms-footer-announcement" key={section.id}><p>{String(settings.heading ?? settings.description ?? section.title)}</p></section>
       if (section.type === 'rich-text') return <section className="section cms-rich-text" key={section.id}><p className="eyebrow">{String(settings.eyebrow ?? '')}</p><h2>{String(settings.heading ?? section.title)}</h2><p>{String(settings.description ?? '')}</p></section>
       return null
-    })}{!homeSections.some(section => section.enabled && (section.type === 'newsletter' || section.type === 'instagram-feed')) && <InstagramFeedSection />}</> : <>
+    })}{!homeSections.some(section => section.enabled && (section.type === 'newsletter' || section.type === 'instagram-feed')) && <InstagramFeedSection />}</> : loading ? <HomeLoadingSections /> : <>
       <section className="section arrivals"><div className="section-heading"><h2>New arrivals</h2><Link to="/shop" className="text-link section-explore-link">Explore all <ArrowUpRight size={14} /></Link></div>{loading ? <div className="product-grid home-grid product-loading-grid">{Array.from({ length: 3 }, (_, index) => <ProductLoadingCard key={index} />)}</div> : error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : products.length ? <div className="product-grid home-grid">{products.slice(0, 3).map(product => <ProductCard key={product.id} product={product} />)}</div> : <p className="catalog-message">No products are available yet.</p>}</section>
       <section className="category-feature"><div className="category-image"><img src={photo('photo-1529139574466-a303027c1d8b', 1300)} alt="OFF ready-to-wear collection" /></div><div className="category-copy"><p className="eyebrow">DRESS WITH INTENTION</p><h2>Uniform<br />for the<br />unordinary.</h2><p>Essential forms. Unexpected details. A wardrobe designed to move with you.</p><Link className="text-link" to="/shop">Explore ready-to-wear <ArrowRight size={14} /></Link></div></section>
       <section className="category-tiles">{[['MEN', 'Shop the collection', 'photo-1503342217505-b0a15ec3261c'], ['WOMEN', 'Discover the edit', 'photo-1515886657613-9f3515b0c78f'], ['ACCESSORIES', 'Complete the look', 'photo-1521369909029-2afed882baee']].map(([title, sub, image]) => <Link to="/shop" className="category-tile" key={title}><img src={photo(image, 700)} alt="" loading="lazy" /><span className="tile-label"><b>{title}</b><small>{sub}</small></span><ArrowRight size={17} /></Link>)}</section>
       <section className="campaign"><img src={photo('photo-1523398002811-999ca8dec234', 1800)} alt="OFF campaign, made for the everyday" loading="lazy" /><div className="campaign-overlay"><p className="eyebrow">{content.campaignEyebrow}</p><h2>{content.campaignTitle}</h2><Link className="button button-light" to="/shop">DISCOVER OFF <ArrowRight size={14} /></Link></div></section>
       <InstagramFeedSection />
     </>}
-  </main><Footer announcement={String(homeSections.find(section => section.type === 'footer-announcement' && section.enabled)?.settings.heading ?? '')} /></>
+  </main></>
 }
 
 function Shop() {
   const { products, categories, collections, homeSections, loading, error, reload } = useCatalog()
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
   const [filterOpen, setFilterOpen] = useState(false)
   const category = params.get('category') ?? ''
   const query = params.get('q')?.toLowerCase() ?? ''
@@ -1073,6 +1454,9 @@ function Shop() {
   const selectedColors = params.getAll('color')
   const selectedCollections = params.getAll('collection')
   const collection = selectedCollections.length === 1 ? collections.find(item => item.slug === selectedCollections[0]) : undefined
+  useEffect(() => {
+    if (collection && !loading) trackAnalyticsEvent({ type: 'collection_view', collectionId: collection._id, navigationKey: location.key })
+  }, [collection?._id, loading, location.key])
   const requestedPrice = Number(params.get('price') ?? '5000')
   const maxPrice = Number.isFinite(requestedPrice) ? Math.min(5000, Math.max(0, requestedPrice)) : 5000
   const page = Math.max(1, Number(params.get('page') ?? '1'))
@@ -1085,6 +1469,25 @@ function Shop() {
   useEffect(() => {
     const controller = new AbortController()
     const apiParams = new URLSearchParams(filterKey)
+    const collectionAliases = [
+      ...collections.map(item => ({ routeSlug: collectionRouteSlug(item.name), collectionSlug: item.slug })),
+      ...getSelectionCards(
+        homeSections.find(section => section.enabled && section.type === 'featured-products')?.settings ?? {},
+        products,
+        collections,
+      ).flatMap(card => {
+        const collection = collections.find(item => item._id === card.collectionId)
+        return collection ? [{ routeSlug: collectionRouteSlug(card.title), collectionSlug: collection.slug }] : []
+      }),
+    ]
+    const requestedCollections = apiParams.getAll('collection')
+    if (requestedCollections.length) {
+      apiParams.delete('collection')
+      for (const slug of requestedCollections) {
+        const actualSlug = collectionAliases.find(alias => alias.routeSlug === slug)?.collectionSlug ?? slug
+        apiParams.append('collection', actualSlug)
+      }
+    }
     apiParams.set('limit', '6')
     apiParams.set('page', String(page))
     if (maxPrice < 5000) apiParams.set('price', String(maxPrice))
@@ -1107,7 +1510,7 @@ function Shop() {
       })
       .finally(() => { if (!controller.signal.aborted) setListingLoading(false) })
     return () => controller.abort()
-  }, [filterKey, page, maxPrice])
+  }, [filterKey, page, maxPrice, collections, homeSections, products])
   const updateFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params)
     next.delete(key)
@@ -1134,10 +1537,13 @@ function Shop() {
   const collectionOptions = linkedCollectionOptions.length
     ? linkedCollectionOptions
     : collections.map(item => ({ card: { title: item.name }, collection: item }))
+  const selectedCollectionCard = selectedCollections.length === 1
+    ? collectionOptions.find(({ card, collection: item }) => item.slug === selectedCollections[0] || collectionRouteSlug(card.title) === selectedCollections[0])
+    : undefined
   const clearFilters = () => { setParams(query ? { q: query } : {}) }
   const activeFilterCount = [selectedSize, ...selectedColors, ...selectedCollections].filter(Boolean).length
   const filterOptions = <div className="shop-filter-options">
-    <div className="filter-group"><h3>Collection</h3><div className="size-chips shop-filter-chips" role="group" aria-label="Filter by collection">{collectionOptions.map(({ card, collection: item }) => <button type="button" key={item._id} className={selectedCollections.includes(item.slug) ? 'selected' : ''} aria-pressed={selectedCollections.includes(item.slug)} onClick={() => toggleMultiFilter('collection', item.slug)}>{card.title}</button>)}</div></div>
+    <div className="filter-group"><h3>Collection</h3><div className="size-chips shop-filter-chips" role="group" aria-label="Filter by collection">{collectionOptions.map(({ card, collection: item }) => { const routeSlug = collectionRouteSlug(card.title); const isSelected = selectedCollections.includes(routeSlug) || selectedCollections.includes(item.slug); return <button type="button" key={item._id} className={isSelected ? 'selected' : ''} aria-pressed={isSelected} onClick={() => toggleMultiFilter('collection', routeSlug)}>{card.title}</button> })}</div></div>
     <div className="filter-group"><h3>Size</h3><div className="size-chips">{['XS', 'S', 'M', 'L', 'XL'].map(size => <button type="button" key={size} className={selectedSize === size ? 'selected' : ''} aria-pressed={selectedSize === size} onClick={() => updateFilter('size', selectedSize === size ? '' : size)}>{size}</button>)}</div></div>
     <div className="filter-group"><h3>Product color</h3><div className="size-chips shop-filter-chips" role="group" aria-label="Filter by product color">{colorChoices.map(color => <button type="button" key={color} className={selectedColors.includes(color) ? 'selected' : ''} aria-pressed={selectedColors.includes(color)} onClick={() => toggleMultiFilter('color', color)}>{color}</button>)}</div></div>
     <button className="clear-filter" type="button" onClick={clearFilters}>Clear all filters</button>
@@ -1149,29 +1555,38 @@ function Shop() {
     <div className="filter-group"><h3>Price — up to {formatTnd(maxPrice)}</h3><input type="range" min="0" max="5000" step="50" value={maxPrice} onChange={event => updateFilter('price', event.target.value === '5000' ? '' : event.target.value)} /><div className="price-range"><span>{formatTnd(0)}</span><span>{formatTnd(5000)}+</span></div></div>
     <button className="clear-filter" type="button" onClick={clearFilters}>Clear all filters</button>
   </>
-  return <><main className="shop-page page-shell">
+  const listingContent = loading || listingLoading
+    ? <div className="product-grid listing-grid product-loading-grid" role="status" aria-label="Loading products">{Array.from({ length: 6 }, (_, index) => <ProductLoadingCard key={index} />)}</div>
+    : error || listingError
+      ? <div className="catalog-message"><p>{error || listingError}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div>
+      : <div className="listing-results">
+        {(query || category || selectedSize || selectedColors.length > 0 || selectedCollections.length > 0 || maxPrice < 5000) && <div className="selected-filters">{query && <span>Search: “{query}”</span>}{category && <span>{category}</span>}{selectedCollections.map(slug => <span key={`collection-${slug}`}>{collectionOptions.find(({ card, collection: item }) => item.slug === slug || collectionRouteSlug(card.title) === slug)?.card.title ?? collections.find(item => item.slug === slug)?.name ?? slug}</span>)}{selectedSize && <span>Size {selectedSize}</span>}{selectedColors.map(color => <span key={`color-${color}`}>{color}</span>)}{maxPrice < 5000 && <span>Up to {formatTnd(maxPrice)}</span>}<button className="text-link" onClick={clearFilters}>Clear all</button></div>}
+        {filtered.length ? <div className="product-grid listing-grid">{filtered.map(product => <ProductCard key={product.id} product={product} />)}</div> : <div className="empty-state"><p className="eyebrow">NOTHING FOUND</p><h2>No pieces match your search.</h2><button className="text-link" onClick={clearFilters}>Clear filters <ArrowRight size={14} /></button></div>}
+        <div className="pagination shop-pagination" role="group" aria-label="Product pages"><button type="button" aria-label="Previous page" disabled={page === 1} onClick={() => updateFilter('page', String(page - 1))}><ArrowLeft size={16} strokeWidth={1.5} /></button><div className="hero-slider-progress">{Array.from({ length: totalPages }, (_, index) => <button type="button" key={index} className={index + 1 === page ? 'active' : ''} aria-label={`Go to page ${index + 1}`} aria-current={index + 1 === page ? 'page' : undefined} onClick={() => updateFilter('page', String(index + 1))} />)}</div><button type="button" aria-label="Next page" disabled={page >= totalPages} onClick={() => updateFilter('page', String(page + 1))}><ArrowRight size={16} strokeWidth={1.5} /></button></div>
+      </div>
+  return <><main className="shop-page page-shell" aria-busy={loading || listingLoading}>
     <div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><span>Shop</span></div>
-    <div className="collection-title"><div className="collection-title-main"><div className="collection-title-line"><h1>{collection?.name || (selectedCollections.length > 1 ? 'Selected collections' : category || 'Ready-to-Wear')}</h1><span className="collection-count" aria-label={`${filteredCount} products`}>{filteredCount}</span></div>{collection?.description && <p>{collection.description}</p>}</div><div className="shop-toolbar-actions"><label>Sort by <select value={sort} onChange={event => updateFilter('sort', event.target.value === 'featured' ? '' : event.target.value)}><option value="featured">Featured</option><option value="manual">Manual Order</option><option value="newest">Newest</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></select></label><button className="filter-trigger" onClick={() => setFilterOpen(true)}>FILTER<span>{activeFilterCount + (category ? 1 : 0)}</span></button></div></div>
-    <div className="shop-layout"><aside className="filter-sidebar">{sidebarFilters}</aside>
-      <div className="listing-area">{loading || listingLoading ? <p className="catalog-message">Loading the collection…</p> : error || listingError ? <div className="catalog-message"><p>{error || listingError}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : <>{(query || category || selectedSize || selectedColors.length > 0 || selectedCollections.length > 0 || maxPrice < 5000) && <div className="selected-filters">{query && <span>Search: “{query}”</span>}{category && <span>{category}</span>}{selectedCollections.map(slug => <span key={`collection-${slug}`}>{collections.find(item => item.slug === slug)?.name ?? slug}</span>)}{selectedSize && <span>Size {selectedSize}</span>}{selectedColors.map(color => <span key={`color-${color}`}>{color}</span>)}{maxPrice < 5000 && <span>Up to {formatTnd(maxPrice)}</span>}<button className="text-link" onClick={clearFilters}>Clear all</button></div>}{filtered.length ? <div className="product-grid listing-grid">{filtered.map(product => <ProductCard key={product.id} product={product} />)}</div> : <div className="empty-state"><p className="eyebrow">NOTHING FOUND</p><h2>No pieces match your search.</h2><button className="text-link" onClick={clearFilters}>Clear filters <ArrowRight size={14} /></button></div>}<div className="pagination shop-pagination" role="group" aria-label="Product pages"><button type="button" aria-label="Previous page" disabled={page === 1} onClick={() => updateFilter('page', String(page - 1))}><ArrowLeft size={16} strokeWidth={1.5} /></button><div className="hero-slider-progress">{Array.from({ length: totalPages }, (_, index) => <button type="button" key={index} className={index + 1 === page ? 'active' : ''} aria-label={`Go to page ${index + 1}`} aria-current={index + 1 === page ? 'page' : undefined} onClick={() => updateFilter('page', String(index + 1))} />)}</div><button type="button" aria-label="Next page" disabled={page >= totalPages} onClick={() => updateFilter('page', String(page + 1))}><ArrowRight size={16} strokeWidth={1.5} /></button></div></>}</div>
+    <div className="collection-title"><div className="collection-title-main"><div className="collection-title-line"><h1>{selectedCollectionCard?.card.title || collection?.name || (selectedCollections.length > 1 ? 'Selected collections' : category || 'Ready-to-Wear')}</h1><span className="collection-count" aria-label={`${filteredCount} products`}>{filteredCount}</span></div>{collection?.description && <p>{collection.description}</p>}</div><div className="shop-toolbar-actions"><label>Sort by <select value={sort} onChange={event => updateFilter('sort', event.target.value === 'featured' ? '' : event.target.value)}><option value="featured">Featured</option><option value="manual">Manual Order</option><option value="newest">Newest</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></select></label><button className="filter-trigger" onClick={() => setFilterOpen(true)}>FILTER<span>{activeFilterCount + (category ? 1 : 0)}</span></button></div></div>
+    <div className="shop-layout"><aside className="filter-sidebar">{loading ? <div className="shop-filter-skeleton" aria-hidden="true"><span className="product-loading-line shop-filter-heading" /><span className="product-loading-line shop-filter-option" /><span className="product-loading-line shop-filter-option" /><span className="product-loading-line shop-filter-option" /><span className="product-loading-line shop-filter-option" /><span className="product-loading-line shop-filter-heading" /><span className="product-loading-line shop-filter-option" /><span className="product-loading-line shop-filter-option" /><span className="product-loading-line shop-filter-option" /></div> : sidebarFilters}</aside>
+      <div className="listing-area" aria-busy={loading || listingLoading}>{listingContent}</div>
     </div>
-  </main><Footer />{filterOpen && <div className="drawer-backdrop" onClick={() => setFilterOpen(false)}><div className="filter-drawer" onClick={e => e.stopPropagation()}><button className="drawer-close" onClick={() => setFilterOpen(false)} aria-label="Close filters"><X size={18} /></button><p className="eyebrow">REFINE YOUR EDIT</p><h2>Filters</h2>{filterOptions}<button className="button button-dark" onClick={() => setFilterOpen(false)}>VIEW {filteredCount} PIECES</button></div></div>}</>
+  </main>{filterOpen && <div className="drawer-backdrop" onClick={() => setFilterOpen(false)}><div className="filter-drawer" onClick={e => e.stopPropagation()}><button className="drawer-close" onClick={() => setFilterOpen(false)} aria-label="Close filters"><X size={18} /></button><p className="eyebrow">REFINE YOUR EDIT</p><h2>Filters</h2>{filterOptions}<button className="button button-dark" onClick={() => setFilterOpen(false)}>VIEW {filteredCount} PIECES</button></div></div>}</>
 }
 
 function CollectionsPage() {
   const { products, collections, homeSections, loading, error, reload } = useCatalog()
   const selectionSection = homeSections.find(section => section.enabled && section.type === 'featured-products')
   const selectionCards = getSelectionCards(selectionSection?.settings ?? {}, products, collections)
-  return <><main className="page-shell shop-page"><div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><span>Collections</span></div><div className="collection-title"><div><p className="eyebrow">THE OFF EDIT</p><h1>Collections</h1></div><span>{selectionCards.length} edits</span></div>{loading ? <p className="catalog-message">Loading collections…</p> : error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : selectionCards.length ? <div className="collections-edition-list">{selectionCards.map((card, index) => {
+  return <><main className="page-shell shop-page" aria-busy={loading}><div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><span>Collections</span></div><div className="collection-title"><div><p className="eyebrow">THE OFF EDIT</p><h1>Collections</h1></div><span>{loading ? '—' : `${selectionCards.length} edits`}</span></div>{loading ? <div className="collections-edition-list collections-loading" role="status" aria-label="Loading collections">{Array.from({ length: 2 }, (_, index) => <section className="collection-edition-row" key={index} aria-hidden="true"><div className="collection-loading-feature product-image-loading"><span className="product-loading-line collection-loading-title" /><span className="product-loading-line collection-loading-description" /></div><div className="collection-loading-products">{Array.from({ length: 4 }, (_, productIndex) => <ProductLoadingCard key={productIndex} />)}</div></section>)}</div> : error ? <div className="catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></div> : selectionCards.length ? <div className="collections-edition-list">{selectionCards.map((card, index) => {
     const collection = collections.find(item => item._id === card.collectionId)
-    const relatedProducts = (collection?.productIds ?? []).slice(0, 4)
+    const relatedProducts = (collection?.productIds ?? []).slice(0, 2)
       .map(id => products.find(product => product.id === id))
       .filter((product): product is Product => Boolean(product))
     return <section className="collection-edition-row" key={`${card.title}-${collection?._id ?? index}`}>
       <div className="collection-edition-feature"><HomeSelectionCards cards={[card]} products={products} collections={collections} /></div>
       <div className="collection-edition-products">{relatedProducts.map(product => <ProductCard key={product.id} product={product} />)}</div>
     </section>
-  })}</div> : <div className="empty-state"><p className="eyebrow">COMING SOON</p><h2>Curated edits are on their way.</h2><Link className="text-link" to="/shop">Shop all pieces <ArrowRight size={14} /></Link></div>}</main><Footer /></>
+  })}</div> : <div className="empty-state"><p className="eyebrow">COMING SOON</p><h2>Curated edits are on their way.</h2><Link className="text-link" to="/shop">Shop all pieces <ArrowRight size={14} /></Link></div>}</main></>
 }
 
 function ProductPage({ addToBag }: { addToBag: (id: string, size: string, color: string, sku: string) => boolean }) {
@@ -1180,6 +1595,9 @@ function ProductPage({ addToBag }: { addToBag: (id: string, size: string, color:
   const id = location.pathname.split('/').filter(Boolean).pop() ?? ''
   useLayoutEffect(() => { window.scrollTo(0, 0) }, [id])
   const product = products.find(item => item.id === id || item.slug === id)
+  useEffect(() => {
+    if (product) trackAnalyticsEvent({ type: 'product_view', productId: product.id, navigationKey: location.key })
+  }, [product?.id, location.key])
   const [mainImage, setMainImage] = useState('')
   const [size, setSize] = useState('')
   const [color, setColor] = useState('')
@@ -1202,7 +1620,7 @@ function ProductPage({ addToBag }: { addToBag: (id: string, size: string, color:
   const productOutOfStock = activeVariants.length === 0 || activeVariants.every((variant) => variant.stock < 1)
   const selectedVariant = product.variants.find((variant) => variant.active && variant.color === color && variant.size === size && variant.stock > 0)
   const galleryImages = [...new Set([...(product.gallery.length ? product.gallery : [product.image]), product.secondary].filter(Boolean))]
-  return <><main className="product-page page-shell"><div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><Link to="/shop">Shop</Link><span>/</span><span>{product.name}</span></div><section className="product-detail"><div className="product-gallery"><div className="gallery-main"><img src={mainImage || product.image} alt={product.name} />{productOutOfStock && <span className="product-stock-badge">OUT OF STOCK</span>}</div>{galleryImages.map((image, index) => <button className={`gallery-thumb ${mainImage === image ? 'active' : ''}`} key={`${image}-${index}`} aria-label={`Show ${product.name}, image ${index + 1}`} aria-pressed={mainImage === image} onClick={() => setMainImage(image)}><img src={image} alt={`${product.name}, view ${index + 1}`} /></button>)}</div><div className="product-info"><p className="eyebrow">{product.category} / OFF ESSENTIALS</p><h1>{product.name}</h1><p className="product-price">{formatTnd(selectedVariant?.price ?? product.price)}</p><p className="product-description">A considered silhouette with a relaxed fit, crafted for everyday movement. Finished with signature OFF detailing.</p><div className="variant-block"><div className="variant-title"><span>Color</span><span>{color}</span></div><div className="swatches">{colors.map((variantColor) => { const variantsForColor = activeVariants.filter((item) => item.color === variantColor); const inStock = variantsForColor.some((item) => item.stock > 0); const variantImage = variantsForColor.find((item) => item.stock > 0 && item.image)?.image ?? variantsForColor.find((item) => item.image)?.image; return <button type="button" key={variantColor} disabled={!inStock} aria-label={`Select color ${variantColor}${inStock ? '' : ', out of stock'}`} title={`${variantColor}${inStock ? '' : ' · Out of stock'}`} aria-pressed={color === variantColor} className={`swatch ${color === variantColor ? 'active' : ''} ${!inStock ? 'unavailable' : ''}`} style={{ background: colorStyle(variantColor) }} onClick={() => { setColor(variantColor); setSize(''); setMessage(''); if (variantImage) setMainImage(variantImage) }} /> })}</div></div><div className="variant-block"><div className="variant-title"><span>Select size</span><button type="button" className="text-link" onClick={() => setMessage('Our model is 188cm and wears size M.')}>Size guide <ArrowDown size={12} /></button></div><div className="size-options">{sizes.map(item => { const inStock = colorVariants.some((entry) => entry.size === item && entry.stock > 0); return <button type="button" key={item} disabled={!inStock} aria-label={`Size ${item}${inStock ? '' : ', out of stock'}`} onClick={() => { setSize(item); setMessage('') }} className={size === item ? 'active' : ''}>{item}</button> })}</div></div><button className="button button-dark add-button" disabled={productOutOfStock} onClick={() => { if (!selectedVariant) { setMessage('Please select an available size before adding to your bag.'); return } setMessage(addToBag(product.id, size, color, selectedVariant.sku) ? 'Added to your bag.' : 'There is not enough stock available.') }}>{productOutOfStock ? 'OUT OF STOCK' : 'ADD TO BAG'} {!productOutOfStock && <Plus size={15} />}</button>{message && <p className="form-message">{message}</p>}<p className="delivery-note"><Check size={14} /> Complimentary shipping on orders over {formatTnd(content.freeShippingThreshold)}</p><div className="accordion">{['DESCRIPTION', 'DETAILS', 'SIZE & FIT', 'MATERIALS & CARE', 'SHIPPING & RETURNS'].map(title => <div key={title}><button onClick={() => setExpanded(expanded === title ? '' : title)}>{title}<Plus size={14} /></button>{expanded === title && <p>{title === 'DESCRIPTION' ? 'A modern essential, designed in Los Angeles and made with considered materials. Clean lines, elevated details, enduring quality.' : 'Designed for a relaxed, contemporary fit. Complimentary shipping and easy returns within 14 days.'}</p>}</div>)}</div></div></section><section className="section related"><div className="section-heading"><p className="eyebrow">COMPLETE THE LOOK</p><h2>You may also like</h2></div><div className="product-grid home-grid">{products.filter((item) => item.id !== product.id).slice(0, 3).map(item => <ProductCard key={item.id} product={item} />)}</div></section></main><Footer /></>
+  return <><main className="product-page page-shell"><div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><Link to="/shop">Shop</Link><span>/</span><span>{product.name}</span></div><section className="product-detail"><div className="product-gallery"><div className="gallery-main"><img src={mainImage || product.image} alt={product.name} />{productOutOfStock && <span className="product-stock-badge">OUT OF STOCK</span>}</div>{galleryImages.map((image, index) => <button className={`gallery-thumb ${mainImage === image ? 'active' : ''}`} key={`${image}-${index}`} aria-label={`Show ${product.name}, image ${index + 1}`} aria-pressed={mainImage === image} onClick={() => setMainImage(image)}><img src={image} alt={`${product.name}, view ${index + 1}`} /></button>)}</div><div className="product-info"><p className="eyebrow">{product.category} / OFF ESSENTIALS</p><h1>{product.name}</h1><p className="product-price">{formatTnd(selectedVariant?.price ?? product.price)}</p><p className="product-description">A considered silhouette with a relaxed fit, crafted for everyday movement. Finished with signature OFF detailing.</p><div className="variant-block"><div className="variant-title"><span>Color</span><span>{color}</span></div><div className="swatches">{colors.map((variantColor) => { const variantsForColor = activeVariants.filter((item) => item.color === variantColor); const inStock = variantsForColor.some((item) => item.stock > 0); const variantImage = variantsForColor.find((item) => item.stock > 0 && item.image)?.image ?? variantsForColor.find((item) => item.image)?.image; return <button type="button" key={variantColor} disabled={!inStock} aria-label={`Select color ${variantColor}${inStock ? '' : ', out of stock'}`} title={`${variantColor}${inStock ? '' : ' · Out of stock'}`} aria-pressed={color === variantColor} className={`swatch ${color === variantColor ? 'active' : ''} ${!inStock ? 'unavailable' : ''}`} style={{ background: colorStyle(variantColor) }} onClick={() => { trackAnalyticsEvent({ type: 'product_variant_select', productId: product.id, variantColor }); setColor(variantColor); setSize(''); setMessage(''); if (variantImage) setMainImage(variantImage) }} /> })}</div></div><div className="variant-block"><div className="variant-title"><span>Select size</span><button type="button" className="text-link" onClick={() => setMessage('Our model is 188cm and wears size M.')}>Size guide <ArrowDown size={12} /></button></div><div className="size-options">{sizes.map(item => { const inStock = colorVariants.some((entry) => entry.size === item && entry.stock > 0); return <button type="button" key={item} disabled={!inStock} aria-label={`Size ${item}${inStock ? '' : ', out of stock'}`} onClick={() => { trackAnalyticsEvent({ type: 'product_variant_select', productId: product.id, variantSize: item, variantColor: color }); setSize(item); setMessage('') }} className={size === item ? 'active' : ''}>{item}</button> })}</div></div><button className="button button-dark add-button" disabled={productOutOfStock} onClick={() => { if (!selectedVariant) { setMessage('Please select an available size before adding to your bag.'); return } setMessage(addToBag(product.id, size, color, selectedVariant.sku) ? 'Added to your bag.' : 'There is not enough stock available.') }}>{productOutOfStock ? 'OUT OF STOCK' : 'ADD TO BAG'} {!productOutOfStock && <Plus size={15} />}</button>{message && <p className="form-message">{message}</p>}<p className="delivery-note"><Check size={14} /> Complimentary shipping on orders over {formatTnd(content.freeShippingThreshold)}</p><div className="accordion">{['DESCRIPTION', 'DETAILS', 'SIZE & FIT', 'MATERIALS & CARE', 'SHIPPING & RETURNS'].map(title => <div key={title}><button onClick={() => setExpanded(expanded === title ? '' : title)}>{title}<Plus size={14} /></button>{expanded === title && <p>{title === 'DESCRIPTION' ? 'A modern essential, designed in Los Angeles and made with considered materials. Clean lines, elevated details, enduring quality.' : 'Designed for a relaxed, contemporary fit. Complimentary shipping and easy returns within 14 days.'}</p>}</div>)}</div></div></section><section className="section related"><div className="section-heading"><p className="eyebrow">COMPLETE THE LOOK</p><h2>You may also like</h2></div><div className="product-grid home-grid">{products.filter((item) => item.id !== product.id).slice(0, 3).map(item => <ProductCard key={item.id} product={item} />)}</div></section></main></>
 }
 
 function Cart({ bag, updateBag }: { bag: BagItem[]; updateBag: (items: BagItem[]) => void }) {
@@ -1214,7 +1632,7 @@ function Cart({ bag, updateBag }: { bag: BagItem[]; updateBag: (items: BagItem[]
   return <><main className="page-shell cart-page"><div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><span>Your bag</span></div><div className="page-title-center"><p className="eyebrow">YOUR SELECTION</p><h1>YOUR BAG ({bag.reduce((sum, item) => sum + item.quantity, 0)})</h1></div>{bag.length ? <div className="cart-layout"><div className="cart-lines">{bag.map((item, index) => { const product = products.find(p => p.id === item.productId); if (!product) return <article className="cart-line unavailable-line" key={`${item.productId}-${item.size}-${index}`}><img src={item.image} alt="" /><div className="cart-line-details"><span>{item.name} — no longer available</span><span>{item.color} / {item.size}</span></div><strong>{formatTnd(item.price * item.quantity)}</strong><button className="remove-item" aria-label={`Remove ${item.name}`} onClick={() => updateBag(bag.filter((_, i) => i !== index))}><X size={15} /></button></article>; return <article className="cart-line" key={`${item.productId}-${item.size}-${index}`}><Link to={`/product/${product.slug}`}><img src={product.image} alt={product.name} /></Link><div className="cart-line-details"><Link to={`/product/${product.slug}`}>{product.name}</Link><span>{item.color} / {item.size}</span><div className="quantity-control"><button aria-label="Decrease quantity" onClick={() => updateBag(bag.map((line, i) => i === index ? { ...line, quantity: Math.max(1, line.quantity - 1) } : line))}><Minus size={12} /></button><span>{item.quantity}</span><button aria-label="Increase quantity" onClick={() => updateBag(bag.map((line, i) => i === index ? { ...line, quantity: Math.min(product.variants.find(v => v.sku === item.sku)?.stock ?? line.quantity, line.quantity + 1) } : line))}><Plus size={12} /></button></div></div><strong>{formatTnd(product.price * item.quantity)}</strong><button className="remove-item" aria-label={`Remove ${product.name}`} onClick={() => updateBag(bag.filter((_, i) => i !== index))}><X size={15} /></button></article> })}</div><aside className="order-summary"><h2>Order summary</h2><div><span>Subtotal</span><span>{formatTnd(total)}</span></div><div><span>Shipping</span><span>Calculated at checkout</span></div><div className="summary-total"><span>Total</span><strong>{formatTnd(total)}</strong></div><button className="button button-dark" onClick={() => navigate('/checkout')} disabled={bag.some((item) => !products.some((product) => product.id === item.productId))}>PROCEED TO CHECKOUT <ArrowRight size={14} /></button><p>{content.announcement}</p></aside></div> : <div className="empty-bag"><ShoppingBag size={26} strokeWidth={1.2} /><h2>Your bag is currently empty.</h2><p>Discover pieces made to move with you.</p><Link className="button button-dark" to="/shop">CONTINUE SHOPPING <ArrowRight size={14} /></Link></div>}</main><Footer /></>
 }
 
-function CartDrawer({ open, onClose, bag, products, updateBag }: { open: boolean; onClose: () => void; bag: BagItem[]; products: Product[]; updateBag: (items: BagItem[]) => void }) {
+function CartDrawer({ open, onClose, bag, products, loading, updateBag }: { open: boolean; onClose: () => void; bag: BagItem[]; products: Product[]; loading: boolean; updateBag: (items: BagItem[]) => void }) {
   const navigate = useNavigate()
   const location = useLocation()
   const triggerRef = useRef<HTMLElement | null>(null)
@@ -1256,9 +1674,9 @@ function CartDrawer({ open, onClose, bag, products, updateBag }: { open: boolean
   const checkout = () => { if (!bag.length) return; onClose(); navigate('/checkout') }
 
   return <div className="cart-drawer-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
-    <section className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="cart-drawer-title" tabIndex={-1} ref={dialogRef}>
+    <section className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="cart-drawer-title" aria-busy={loading && bag.length > 0} tabIndex={-1} ref={dialogRef}>
       <header className="cart-drawer-header"><h2 id="cart-drawer-title">CART{bag.length > 0 ? ` (${bag.reduce((sum, item) => sum + item.quantity, 0)})` : ''}</h2><button type="button" className="cart-drawer-close" aria-label="Close cart" onClick={onClose}><X size={20} strokeWidth={1.4} /></button></header>
-      {bag.length ? <><div className="cart-drawer-items">{bag.map((item, index) => {
+      {loading && bag.length ? <><div className="cart-drawer-items cart-drawer-loading" role="status" aria-label="Loading bag items">{bag.map(item => <article className="cart-drawer-item" key={`${item.productId}-${item.sku}`} aria-hidden="true"><div className="cart-drawer-image product-image-loading" /><div className="cart-drawer-item-info"><span className="product-loading-line cart-loading-label" /><span className="product-loading-line cart-loading-name" /><span className="product-loading-line cart-loading-variant" /><span className="product-loading-line cart-loading-price" /><div className="cart-drawer-item-actions"><span className="product-loading-line cart-loading-quantity" /><span className="product-loading-line cart-loading-remove" /></div></div></article>)}</div><footer className="cart-drawer-footer cart-drawer-footer-loading" aria-hidden="true"><span className="product-loading-line cart-loading-note" /><span className="product-loading-line cart-loading-shipping" /><div className="cart-subtotal"><span className="product-loading-line cart-loading-subtotal-label" /><span className="product-loading-line cart-loading-subtotal" /></div><span className="product-loading-line cart-loading-checkout" /></footer></> : bag.length ? <><div className="cart-drawer-items">{bag.map((item, index) => {
         const product = products.find(entry => entry.id === item.productId)
         const variant = product?.variants.find(entry => entry.sku === item.sku)
         const unavailable = !product || !variant?.active
@@ -1278,11 +1696,70 @@ function Checkout({ bag, clearBag }: { bag: BagItem[]; clearBag: () => void }) {
   return CLERK_PUBLISHABLE_KEY ? <AuthenticatedCheckout bag={bag} clearBag={clearBag} /> : <CheckoutForm bag={bag} clearBag={clearBag} />
 }
 
+function CheckoutHeader({ step = 1 }: { step?: 1 | 2 | 3 }) {
+  return <>
+    <div className="checkout-announcement">Complimentary shipping on orders over 500 TND</div>
+    <header className="checkout-header">
+      <Link className="checkout-brand" to="/" aria-label="OFF home"><img src="/off-logo.svg" alt="OFF" /></Link>
+      <nav className="checkout-steps" aria-label="Checkout progress">
+        <span className={step === 1 ? 'active' : ''} aria-current={step === 1 ? 'step' : undefined}>01 Information</span><i aria-hidden="true">/</i><span className={step === 2 ? 'active' : ''} aria-current={step === 2 ? 'step' : undefined}>02 Delivery</span><i aria-hidden="true">/</i><span className={step === 3 ? 'active' : ''} aria-current={step === 3 ? 'step' : undefined}>03 Payment</span>
+      </nav>
+      <Link className="checkout-back-to-bag" to="/cart"><ShoppingBag size={15} strokeWidth={1.5} /><span>Back to bag</span></Link>
+    </header>
+  </>
+}
+
+function CheckoutFooter() {
+  return <footer className="checkout-footer"><span>© 2026 OFF. All rights reserved.</span><span>Made with intention</span></footer>
+}
+
+function CheckoutOrderSummary({ bag, products, total, freeShippingThreshold }: { bag: BagItem[]; products: Product[]; total: number; freeShippingThreshold: number }) {
+  const itemCount = bag.reduce((sum, item) => sum + item.quantity, 0)
+  const shippingLabel = total >= freeShippingThreshold ? 'Complimentary' : 'Calculated at checkout'
+  return <aside className="checkout-summary">
+    <div className="checkout-summary-inner">
+      <header className="checkout-summary-heading">
+        <span className="checkout-summary-rule" />
+        <p>Your selection</p>
+        <h2>In your <em>bag</em> ({itemCount})</h2>
+      </header>
+      <div className="checkout-summary-items">
+        {bag.map((item, index) => {
+          const product = products.find(entry => entry.id === item.productId)
+          const variantPrice = product?.variants.find(variant => variant.sku === item.sku)?.price
+          const itemPrice = (variantPrice ?? item.price) * item.quantity
+          return <article className="checkout-summary-item" key={`${item.productId}-${item.sku}-${index}`}>
+            <span className="checkout-summary-image">
+              <img src={product?.image || item.image} alt={product?.name ?? item.name} />
+              <span>{item.quantity}</span>
+            </span>
+            <span className="checkout-summary-product">
+              <strong>{product?.name ?? item.name}</strong>
+              <small>{item.color} / {item.size}</small>
+            </span>
+            <strong className="checkout-summary-price">{formatTnd(itemPrice)}</strong>
+          </article>
+        })}
+      </div>
+      <div className="checkout-summary-totals">
+        <p><span>Subtotal · {itemCount} {itemCount === 1 ? 'item' : 'items'}</span><strong>{formatTnd(total)}</strong></p>
+        <p><span>Shipping</span><strong>{shippingLabel}</strong></p>
+        <p className="checkout-summary-total"><span>Total</span><strong>{formatTnd(total)}</strong></p>
+        <small>Payable in cash on delivery</small>
+      </div>
+      <div className="checkout-shipping-callout"><strong>Complimentary shipping</strong><span>On orders over {formatTnd(freeShippingThreshold)}. Delivered in 3–5 days across Tunisia.</span></div>
+    </div>
+  </aside>
+}
+
 function CheckoutForm({ bag, clearBag, getSessionToken, customerProfile, authenticated = false }: { bag: BagItem[]; clearBag: () => void; getSessionToken?: () => Promise<string | null>; customerProfile?: { email: string; firstName: string; lastName: string; phoneNumber: string }; authenticated?: boolean }) {
-  const { products, loading, error, reload } = useCatalog()
+  const location = useLocation()
+  const { products, content, loading, error, reload } = useCatalog()
+  const [step, setStep] = useState<1 | 2 | 3>(1)
   const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [placedOrder, setPlacedOrder] = useState<CashOnDeliveryOrderResponse | null>(null)
+  const formRef = useRef<HTMLFormElement>(null)
   const [form, setForm] = useState({ email: '', firstName: '', lastName: '', phoneNumber: '', line1: '', line2: '', postalCode: '', governorate: 'Tunis', delegation: 'Bab Bhar' })
   const [savedAddresses, setSavedAddresses] = useState<CheckoutSavedAddress[]>([])
   const [selectedAddressId, setSelectedAddressId] = useState('')
@@ -1294,6 +1771,10 @@ function CheckoutForm({ bag, clearBag, getSessionToken, customerProfile, authent
   const governorates = Object.keys(TUNISIA_LOCATIONS)
   const delegations = TUNISIA_LOCATIONS[form.governorate] ?? []
   const total = bag.reduce((sum, item) => sum + (products.find(p => p.id === item.productId)?.variants.find(variant => variant.sku === item.sku)?.price ?? item.price) * item.quantity, 0)
+
+  useEffect(() => {
+    if (bag.length) trackAnalyticsEvent({ type: 'begin_checkout', navigationKey: location.key })
+  }, [bag.length, location.key])
 
   useEffect(() => {
     if (!customerProfile) return
@@ -1349,6 +1830,7 @@ function CheckoutForm({ bag, clearBag, getSessionToken, customerProfile, authent
   }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    trackAnalyticsEvent({ type: 'checkout_step', checkoutStep: 'shipping_information_completed' })
     setSubmitting(true)
     setFormError('')
     setSavedAddressMessage('')
@@ -1395,6 +1877,7 @@ function CheckoutForm({ bag, clearBag, getSessionToken, customerProfile, authent
         },
         items: bag.map(item => ({ productId: item.productId, sku: item.sku, quantity: item.quantity })),
         orderNote: localStorage.getItem('off-cart-note')?.slice(0, 500) ?? '',
+        analyticsAttribution: getAnalyticsAttribution(),
       }
       const response = await fetch(`${API_BASE_URL}/orders/checkout/cod`, {
         method: 'POST',
@@ -1412,12 +1895,91 @@ function CheckoutForm({ bag, clearBag, getSessionToken, customerProfile, authent
       setSubmitting(false)
     }
   }
-  if (loading) return <main className="page-shell catalog-message">Loading checkout…</main>
-  if (error) return <main className="page-shell catalog-message"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></main>
-  if (placedOrder) return <main className="page-shell confirmation"><div className="confirmation-mark"><Check size={24} /></div><p className="eyebrow">ORDER CONFIRMED</p><h1>Thank you.</h1><p>Your order is confirmed. Pay {formatTnd(placedOrder.total)} in cash when it is delivered.</p><p>Order {placedOrder.orderNumber}</p><Link className="button button-dark" to="/">RETURN TO OFF</Link></main>
-  if (!bag.length) return <><main className="page-shell empty-state"><p className="eyebrow">YOUR BAG IS EMPTY</p><h1>Add something to your bag before checkout.</h1><Link className="button button-dark" to="/shop">DISCOVER THE COLLECTION <ArrowRight size={14} /></Link></main><Footer /></>
-  if (bag.some(item => !products.some(product => product.id === item.productId && product.variants.some(variant => variant.sku === item.sku && variant.active)))) return <main className="page-shell catalog-message"><p>A piece in your bag is no longer available. Remove it before checkout.</p><Link className="text-link" to="/cart">Review your bag <ArrowRight size={14} /></Link></main>
-  return <><main className="page-shell checkout-page"><div className="breadcrumbs"><Link to="/">Home</Link><span>/</span><Link to="/cart">Bag</Link><span>/</span><span>Checkout</span></div><div className="checkout-steps"><span className="active">01 Information</span><span className="active">02 Delivery</span><span className="active">03 Payment</span></div><h1>CONTACT INFORMATION</h1><form className="checkout-form" onSubmit={submit}><label>Email address (optional)<input type="email" autoComplete="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} placeholder="name@email.com" /></label>{authenticated && <><label>Saved delivery address<select aria-label="Saved delivery address" value={selectedAddressId} onChange={event => selectSavedAddress(event.target.value)}><option value="">Enter a new address</option>{savedAddresses.map(address => <option key={address._id} value={address._id}>{address.label}{address.isDefault ? ' · Default' : ''} — {address.addressLine1}, {address.city}</option>)}</select></label>{addressesLoading && <p className="payment-note">Loading your saved addresses…</p>}{addressesError && <p className="form-message" role="alert">{addressesError}</p>}</>}<h2>SHIPPING ADDRESS · TUNISIA</h2><div className="form-row"><input aria-label="First name" autoComplete="given-name" value={form.firstName} onChange={event => setForm({ ...form, firstName: event.target.value })} placeholder="First name" required /><input aria-label="Last name" autoComplete="family-name" value={form.lastName} onChange={event => setForm({ ...form, lastName: event.target.value })} placeholder="Last name" required /></div><label>Phone number<input type="tel" autoComplete="tel" value={form.phoneNumber} onChange={event => setForm({ ...form, phoneNumber: event.target.value })} placeholder="Phone number" /></label><input aria-label="Address" autoComplete="address-line1" value={form.line1} onChange={event => setForm({ ...form, line1: event.target.value })} placeholder="Street address" required /><input aria-label="Apartment" autoComplete="address-line2" value={form.line2} onChange={event => setForm({ ...form, line2: event.target.value })} placeholder="Apartment, suite, etc. (optional)" /><div className="form-row"><select aria-label="Governorate" value={form.governorate} onChange={event => { const governorate = event.target.value; const nextDelegation = TUNISIA_LOCATIONS[governorate][0]; setForm(current => ({ ...current, governorate, delegation: nextDelegation })) }} required>{governorates.map(governorate => <option key={governorate} value={governorate}>{governorate}</option>)}</select><select aria-label="Delegation" value={form.delegation} onChange={event => setForm(current => ({ ...current, delegation: event.target.value }))} required>{delegations.map(delegation => <option key={delegation} value={delegation}>{delegation}</option>)}</select></div><label>Postal code (optional)<input autoComplete="postal-code" value={form.postalCode} onChange={event => setForm({ ...form, postalCode: event.target.value })} placeholder="Postal code" /></label>{authenticated && !selectedAddressId && <div className="checkout-save-address"><label><input type="checkbox" checked={saveAddress} onChange={event => setSaveAddress(event.target.checked)} /> Save this address to my account</label>{saveAddress && <label>Address name<input value={addressLabel} onChange={event => setAddressLabel(event.target.value)} placeholder="Home, Work…" /></label>}</div>}{savedAddressMessage && <p className="payment-note" role="status">{savedAddressMessage}</p>}<h2>DELIVERY METHOD</h2><label className="shipping-choice"><input type="radio" name="shipping" checked readOnly /><span>Standard delivery · 3–5 days</span><b>Complimentary</b></label><h2>PAYMENT</h2><label className="shipping-choice"><input type="radio" name="payment" checked readOnly /><span>Cash on delivery</span><b>Pay when delivered</b></label><p className="payment-note">Your order total is payable in cash upon delivery.</p>{formError && <p className="form-message" role="alert">{formError}</p>}<div className="checkout-total"><span>Order total</span><strong>{formatTnd(total)}</strong></div><button className="button button-dark checkout-submit" disabled={submitting}>{submitting ? 'PLACING YOUR ORDER…' : 'CONFIRM ORDER — PAY ON DELIVERY'} <ArrowRight size={14} /></button></form></main><Footer /></>
+  if (loading) return <div className="checkout-experience"><CheckoutHeader step={step} /><main className="checkout-status">Loading checkout…</main><CheckoutFooter /></div>
+  if (error) return <div className="checkout-experience"><CheckoutHeader step={step} /><main className="checkout-status"><p>{error}</p><button className="text-link" onClick={reload}>Try again <ArrowRight size={14} /></button></main><CheckoutFooter /></div>
+  if (placedOrder) return <div className="checkout-experience"><CheckoutHeader step={3} /><main className="page-shell confirmation"><div className="confirmation-mark"><Check size={24} /></div><p className="eyebrow">ORDER CONFIRMED</p><h1>Thank you.</h1><p>Your order is confirmed. Pay {formatTnd(placedOrder.total)} in cash when it is delivered.</p><p>Order {placedOrder.orderNumber}</p><Link className="button button-dark" to="/">RETURN TO OFF</Link></main><CheckoutFooter /></div>
+  if (!bag.length) return <div className="checkout-experience"><CheckoutHeader step={step} /><main className="checkout-status checkout-empty"><p className="eyebrow">YOUR BAG IS EMPTY</p><h1>Add something to your bag before checkout.</h1><Link className="button button-dark" to="/shop">DISCOVER THE COLLECTION <ArrowRight size={14} /></Link></main><CheckoutFooter /></div>
+  if (bag.some(item => !products.some(product => product.id === item.productId && product.variants.some(variant => variant.sku === item.sku && variant.active)))) return <div className="checkout-experience"><CheckoutHeader step={step} /><main className="checkout-status"><p>A piece in your bag is no longer available. Remove it before checkout.</p><Link className="text-link" to="/cart">Review your bag <ArrowRight size={14} /></Link></main><CheckoutFooter /></div>
+  const freeShippingThreshold = content.freeShippingThreshold
+  return <div className="checkout-experience">
+    <CheckoutHeader step={step} />
+    <nav className="checkout-breadcrumbs" aria-label="Breadcrumb"><Link to="/">Home</Link><span>/</span><Link to="/cart">Bag</Link><span>/</span><span>Checkout</span></nav>
+    <main className="checkout-layout">
+      <section className="checkout-form-column">
+        <form className="checkout-form" ref={formRef} onSubmit={submit}>
+          {step === 1 && <>
+          <section className="checkout-section checkout-information">
+            <div className="checkout-section-heading"><p>Step 01 · Information</p><h1>Contact <em>info</em></h1></div>
+            <div className="checkout-field">
+              <label htmlFor="checkout-email">Email address <small>Optional</small></label>
+              <input id="checkout-email" type="email" autoComplete="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} placeholder="name@email.com" />
+            </div>
+            {authenticated && <div className="checkout-field">
+              <label htmlFor="checkout-saved-address">Saved delivery address</label>
+              <select id="checkout-saved-address" aria-label="Saved delivery address" value={selectedAddressId} onChange={event => selectSavedAddress(event.target.value)}>
+                <option value="">Enter a new address</option>
+                {savedAddresses.map(address => <option key={address._id} value={address._id}>{address.label}{address.isDefault ? ' · Default' : ''} — {address.addressLine1}, {address.city}</option>)}
+              </select>
+              {addressesLoading && <p className="payment-note">Loading your saved addresses…</p>}
+              {addressesError && <p className="form-message" role="alert">{addressesError}</p>}
+            </div>}
+            <div className="checkout-shipping-address">
+              <div className="checkout-section-heading"><p>Shipping address · Tunisia</p><h2>Where should we <em>deliver?</em></h2></div>
+              <div className="checkout-form-row">
+                <div className="checkout-field"><label htmlFor="checkout-first-name">First name</label><input id="checkout-first-name" autoComplete="given-name" value={form.firstName} onChange={event => setForm({ ...form, firstName: event.target.value })} placeholder="First name" required /></div>
+                <div className="checkout-field"><label htmlFor="checkout-last-name">Last name</label><input id="checkout-last-name" autoComplete="family-name" value={form.lastName} onChange={event => setForm({ ...form, lastName: event.target.value })} placeholder="Last name" required /></div>
+              </div>
+              <div className="checkout-field"><label htmlFor="checkout-phone">Phone number</label><input id="checkout-phone" type="tel" autoComplete="tel" value={form.phoneNumber} onChange={event => setForm({ ...form, phoneNumber: event.target.value })} placeholder="Phone number" /></div>
+              <div className="checkout-field"><label htmlFor="checkout-address">Street address</label><input id="checkout-address" autoComplete="address-line1" value={form.line1} onChange={event => setForm({ ...form, line1: event.target.value })} placeholder="Street address" required /></div>
+              <div className="checkout-field"><label htmlFor="checkout-apartment">Apartment, suite, etc. <small>Optional</small></label><input id="checkout-apartment" autoComplete="address-line2" value={form.line2} onChange={event => setForm({ ...form, line2: event.target.value })} placeholder="Apartment, suite, etc." /></div>
+              <div className="checkout-form-row">
+                <div className="checkout-field"><label htmlFor="checkout-governorate">Governorate</label><select id="checkout-governorate" aria-label="Governorate" value={form.governorate} onChange={event => { const governorate = event.target.value; const nextDelegation = TUNISIA_LOCATIONS[governorate][0]; setForm(current => ({ ...current, governorate, delegation: nextDelegation })) }} required>{governorates.map(governorate => <option key={governorate} value={governorate}>{governorate}</option>)}</select></div>
+                <div className="checkout-field"><label htmlFor="checkout-delegation">Delegation</label><select id="checkout-delegation" aria-label="Delegation" value={form.delegation} onChange={event => setForm(current => ({ ...current, delegation: event.target.value }))} required>{delegations.map(delegation => <option key={delegation} value={delegation}>{delegation}</option>)}</select></div>
+              </div>
+              <div className="checkout-field"><label htmlFor="checkout-postal-code">Postal code <small>Optional</small></label><input id="checkout-postal-code" autoComplete="postal-code" value={form.postalCode} onChange={event => setForm({ ...form, postalCode: event.target.value })} placeholder="Postal code" /></div>
+              {authenticated && !selectedAddressId && <div className="checkout-save-address">
+                <label htmlFor="checkout-save-address"><input id="checkout-save-address" type="checkbox" checked={saveAddress} onChange={event => setSaveAddress(event.target.checked)} /> Save this address to my account</label>
+                {saveAddress && <div className="checkout-field"><label htmlFor="checkout-address-name">Address name</label><input id="checkout-address-name" value={addressLabel} onChange={event => setAddressLabel(event.target.value)} placeholder="Home, Work…" /></div>}
+              </div>}
+              {savedAddressMessage && <p className="payment-note" role="status">{savedAddressMessage}</p>}
+            </div>
+          </section>
+          <div className="checkout-step-actions checkout-step-actions-next">
+            <button className="button button-dark checkout-submit" type="button" onClick={() => {
+              if (formRef.current?.reportValidity()) setStep(2)
+            }}>CONTINUE TO DELIVERY <ArrowRight size={14} /></button>
+          </div>
+          </>}
+          {step === 2 && <>
+          <section className="checkout-section">
+            <div className="checkout-section-heading"><p>Step 02 · Delivery</p><h2>Delivery <em>method</em></h2></div>
+            <label className="shipping-choice"><input type="radio" name="shipping" checked readOnly /><span><strong>Standard delivery</strong><small>3–5 days · Complimentary</small></span><b>Complimentary</b></label>
+          </section>
+          <div className="checkout-step-actions">
+            <button className="checkout-step-back" type="button" onClick={() => setStep(1)}>BACK TO INFORMATION</button>
+            <button className="button button-dark checkout-submit" type="button" onClick={() => setStep(3)}>CONTINUE TO PAYMENT <ArrowRight size={14} /></button>
+          </div>
+          </>}
+          {step === 3 && <>
+          <section className="checkout-section">
+            <div className="checkout-section-heading"><p>Step 03 · Payment</p><h2><em>Payment</em></h2></div>
+            <label className="shipping-choice"><input type="radio" name="payment" checked readOnly /><span><strong>Cash on delivery</strong><small>Pay when delivered</small></span><b>Cash</b></label>
+            <p className="payment-note">Your order total is payable in cash upon delivery.</p>
+          </section>
+          <div className="checkout-step-actions checkout-step-actions-payment">
+            <button className="checkout-step-back" type="button" onClick={() => setStep(2)}>BACK TO DELIVERY</button>
+          </div>
+          {formError && <p className="form-message" role="alert">{formError}</p>}
+          <div className="checkout-total"><span>Order total</span><strong>{formatTnd(total)}</strong></div>
+          <button className="button button-dark checkout-submit" disabled={submitting}>{submitting ? 'PLACING YOUR ORDER…' : 'CONFIRM ORDER — PAY ON DELIVERY'} <ArrowRight size={14} /></button>
+          <nav className="checkout-legal-links" aria-label="Checkout information"><Link to="/faq">Shipping &amp; returns</Link><Link to="/legal">Privacy</Link><Link to="/contact">Contact</Link></nav>
+          </>}
+        </form>
+      </section>
+      <CheckoutOrderSummary bag={bag} products={products} total={total} freeShippingThreshold={freeShippingThreshold} />
+    </main>
+    <CheckoutFooter />
+  </div>
 }
 
 function AuthenticatedCheckout({ bag, clearBag }: { bag: BagItem[]; clearBag: () => void }) {
@@ -1428,12 +1990,17 @@ function AuthenticatedCheckout({ bag, clearBag }: { bag: BagItem[]; clearBag: ()
 }
 
 function CheckoutSuccess({ clearBag }: { clearBag: () => void }) {
+  const { content } = useCatalog()
   const [searchParams] = useSearchParams()
   const sessionId = searchParams.get('session_id') ?? ''
   const [status, setStatus] = useState<'loading' | 'paid' | 'pending' | 'failed' | 'error'>('loading')
   const [orderNumber, setOrderNumber] = useState('')
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
+    if (!content.onlinePaymentEnabled) {
+      setStatus('failed')
+      return
+    }
     if (!sessionId) { setStatus('error'); return }
     let cancelled = false
     fetch(`${API_BASE_URL}/orders/checkout/session/${encodeURIComponent(sessionId)}`)
@@ -1454,12 +2021,13 @@ function CheckoutSuccess({ clearBag }: { clearBag: () => void }) {
       })
       .catch(() => { if (!cancelled) setStatus('error') })
     return () => { cancelled = true }
-  }, [sessionId, attempt, clearBag])
+  }, [content.onlinePaymentEnabled, sessionId, attempt, clearBag])
   const message = status === 'loading' ? 'Verifying your payment…'
     : status === 'paid' ? 'Your payment is confirmed. We’ll send your order details by email.'
       : status === 'pending' ? 'Your payment is still processing. Please check your email shortly.'
-        : status === 'failed' ? 'This payment was not completed. Your reserved items will be returned to stock.'
-          : 'We could not verify this checkout session.'
+          : status === 'failed' && !content.onlinePaymentEnabled ? 'Online payment is currently disabled. Please contact the store if you believe an order was placed.'
+            : status === 'failed' ? 'This payment was not completed. Your reserved items will be returned to stock.'
+            : 'We could not verify this checkout session.'
   return <main className="page-shell confirmation"><div className="confirmation-mark">{status === 'paid' ? <Check size={24} /> : <ShoppingBag size={22} />}</div><p className="eyebrow">{status === 'paid' ? 'ORDER CONFIRMED' : 'PAYMENT STATUS'}</p><h1>{status === 'paid' ? 'Thank you.' : 'Almost there.'}</h1><p>{message}</p>{orderNumber && <p>Order {orderNumber}</p>}<Link className="button button-dark" to="/">RETURN TO OFF</Link></main>
 }
 
@@ -1521,11 +2089,22 @@ function Storefront() {
   const [bag, setBag] = useState<BagItem[]>(() => { try { return JSON.parse(localStorage.getItem('off-preview-bag') ?? '[]') as BagItem[] } catch { return [] } })
   const [guestWishlistIds, setGuestWishlistIds] = useState<string[]>(() => { try { const value = JSON.parse(localStorage.getItem(GUEST_WISHLIST_STORAGE_KEY) ?? '[]') as unknown; return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [] } catch { return [] } })
   const [cartOpen, setCartOpen] = useState(false)
-  const updateBag = useCallback((next: BagItem[]) => { setBag(next); localStorage.setItem('off-preview-bag', JSON.stringify(next)) }, [])
+  const updateBag = useCallback((next: BagItem[]) => {
+    for (const item of bag) {
+      const remaining = next.find(candidate => candidate.productId === item.productId && candidate.sku === item.sku)?.quantity ?? 0
+      if (remaining < item.quantity) trackAnalyticsEvent({ type: 'remove_from_cart', productId: item.productId, variantSize: item.size, variantColor: item.color })
+    }
+    for (const item of next) {
+      const previous = bag.find(candidate => candidate.productId === item.productId && candidate.sku === item.sku)?.quantity ?? 0
+      if (item.quantity > previous) trackAnalyticsEvent({ type: 'add_to_cart', productId: item.productId, variantSize: item.size, variantColor: item.color })
+    }
+    setBag(next)
+    localStorage.setItem('off-preview-bag', JSON.stringify(next))
+  }, [bag])
   const toggleGuestWishlist = useCallback((productId: string) => setGuestWishlistIds(current => current.includes(productId) ? current.filter(id => id !== productId) : [...current, productId]), [])
   useEffect(() => { localStorage.setItem(GUEST_WISHLIST_STORAGE_KEY, JSON.stringify(guestWishlistIds)) }, [guestWishlistIds])
-  const clearBag = useCallback(() => updateBag([]), [updateBag])
-  const { products } = useCatalog()
+  const clearBag = useCallback(() => { setBag([]); localStorage.setItem('off-preview-bag', '[]') }, [])
+  const { products, loading, websiteSettings, homeSections } = useCatalog()
   const addToBag = (productId: string, size: string, color: string, sku: string, requestedQuantity = 1): boolean => {
     const product = products.find((item) => item.id === productId)
     const variant = product?.variants.find((item) => item.sku === sku && item.color === color && item.size === size && item.active)
@@ -1539,6 +2118,50 @@ function Storefront() {
       : bag.map((item, index) => index === found ? { ...item, quantity: item.quantity + quantity } : item))
     return true
   }
+  const location = useLocation()
+  const isSocialLanding = location.pathname.startsWith('/follow')
+  const isCheckoutPage = location.pathname === '/checkout'
+  const isStandalonePage = isSocialLanding || isCheckoutPage
+  useEffect(() => {
+    if (isStandalonePage) setCartOpen(false)
+  }, [isStandalonePage])
+  useEffect(() => {
+    trackAnalyticsPage(location.pathname, location.key)
+    window.dispatchEvent(new Event('off-analytics-page-change'))
+    const trackAfterConsent = () => trackAnalyticsPage(location.pathname, `${location.key}:consent`)
+    window.addEventListener('off-analytics-consent-changed', trackAfterConsent)
+    return () => window.removeEventListener('off-analytics-consent-changed', trackAfterConsent)
+  }, [location.pathname, location.key])
+  useEffect(() => initializeCtaTracking(), [])
   const count = bag.reduce((sum, item) => sum + item.quantity, 0)
-  return <GuestWishlistContext.Provider value={{ ids: guestWishlistIds, toggle: toggleGuestWishlist }}><Header bagCount={count} onOpenCart={() => setCartOpen(true)} /><Routes><Route path="/" element={<Home addToBag={addToBag} />} /><Route path="/shop" element={<Shop />} /><Route path="/wishlist" element={<WishlistLanding />} /><Route path="/collections" element={<CollectionsPage />} /><Route path="/product/:id" element={<ProductPage addToBag={addToBag} />} /><Route path="/cart" element={<Cart bag={bag} updateBag={updateBag} />} /><Route path="/checkout" element={<Checkout bag={bag} clearBag={clearBag} />} /><Route path="/checkout/success" element={<CheckoutSuccess clearBag={clearBag} />} /><Route path="/about" element={<About />} /><Route path="/faq" element={<CmsPage slug="faq" />} /><Route path="/contact" element={<CmsPage slug="contact" />} /><Route path="/legal" element={<CmsPage slug="legal" />} /><Route path="/releases" element={<CmsPage slug="releases" />} /><Route path="/releases/:slug" element={<CmsPage slug="release-detail" />} /><Route path="/account/*" element={CLERK_PUBLISHABLE_KEY ? <CustomerAccountExperience apiBaseUrl={API_BASE_URL} products={products} addToBag={addToBag} formatPrice={formatTnd} renderProductCard={(product, liked, onWishlistToggle) => <ProductCard product={product} liked={liked} onWishlistToggle={onWishlistToggle} />} footer={<Footer />} /> : <ClerkSetupNotice />} /><Route path="/sign-in/*" element={<Navigate to="/account?mode=sign-in" replace />} /><Route path="/sign-up/*" element={<Navigate to="/account?mode=sign-up" replace />} /><Route path="/:slug" element={<CmsRoutePage />} /><Route path="*" element={<main className="page-shell empty-state"><p className="eyebrow">404 — NOT FOUND</p><h1>We can't find that page.</h1><Link className="button button-dark" to="/">BACK TO OFF</Link></main>} /></Routes><CartDrawer open={cartOpen} onClose={() => setCartOpen(false)} bag={bag} products={products} updateBag={updateBag} /><WhatsAppFloatingButton /></GuestWishlistContext.Provider>
+  const footerAnnouncement = String(homeSections.find(section => section.type === 'footer-announcement' && section.enabled)?.settings.heading ?? '')
+  return <GuestWishlistContext.Provider value={{ ids: guestWishlistIds, toggle: toggleGuestWishlist }}>
+    {!isStandalonePage && <Header bagCount={count} onOpenCart={() => setCartOpen(true)} />}
+    <Routes>
+      <Route path="/" element={<Home addToBag={addToBag} />} />
+      <Route path="/shop" element={<Shop />} />
+      <Route path="/wishlist" element={<WishlistLanding />} />
+      <Route path="/collections" element={<CollectionsPage />} />
+      <Route path="/product/:id" element={<ProductPage addToBag={addToBag} />} />
+      <Route path="/cart" element={<Cart bag={bag} updateBag={updateBag} />} />
+      <Route path="/checkout" element={<Checkout bag={bag} clearBag={clearBag} />} />
+      <Route path="/checkout/success" element={<CheckoutSuccess clearBag={clearBag} />} />
+      <Route path="/about" element={<About />} />
+      <Route path="/faq" element={<CmsPage slug="faq" />} />
+      <Route path="/contact" element={<CmsPage slug="contact" />} />
+      <Route path="/legal" element={<CmsPage slug="legal" />} />
+      <Route path="/releases" element={<CmsPage slug="releases" />} />
+      <Route path="/releases/:slug" element={<CmsPage slug="release-detail" />} />
+      <Route path="/account/*" element={CLERK_PUBLISHABLE_KEY ? <CustomerAccountExperience apiBaseUrl={API_BASE_URL} products={products} addToBag={addToBag} formatPrice={formatTnd} renderProductCard={(product, liked, onWishlistToggle) => <ProductCard product={product} liked={liked} onWishlistToggle={onWishlistToggle} />} footer={<Footer />} /> : <ClerkSetupNotice />} />
+      <Route path="/sign-in/*" element={<Navigate to="/account?mode=sign-in" replace />} />
+      <Route path="/sign-up/*" element={<Navigate to="/account?mode=sign-up" replace />} />
+      <Route path="/follow" element={<SocialLanding websiteSettings={websiteSettings} />} />
+      <Route path="/:slug" element={<CmsRoutePage />} />
+      <Route path="*" element={<main className="page-shell empty-state"><p className="eyebrow">404 — NOT FOUND</p><h1>We can't find that page.</h1><Link className="button button-dark" to="/">BACK TO OFF</Link></main>} />
+    </Routes>
+    {!location.pathname.startsWith('/checkout') && <Footer layout announcement={footerAnnouncement} />}
+    {!isStandalonePage && <CartDrawer open={cartOpen} onClose={() => setCartOpen(false)} bag={bag} products={products} loading={loading} updateBag={updateBag} />}
+    {!isStandalonePage && <WhatsAppFloatingButton />}
+    <CookieConsentManager />
+  </GuestWishlistContext.Provider>
 }

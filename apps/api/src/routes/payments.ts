@@ -3,6 +3,7 @@ import express, { Router } from 'express'
 import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import { cancelPendingOrder, markOrderPaid } from './checkout.js'
+import { isOnlinePaymentEnabled } from '../runtimeConfig.js'
 
 const router = Router()
 const webhookLimit = rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: 'draft-7', legacyHeaders: false })
@@ -31,7 +32,16 @@ function validStripeSignature(payload: Buffer, header: string, secret: string) {
   })
 }
 
+export function isConfirmedStripePayment(eventType: string, paymentStatus: string | undefined) {
+  return (eventType === 'checkout.session.completed' || eventType === 'checkout.session.async_payment_succeeded')
+    && paymentStatus === 'paid'
+}
+
 router.post('/webhook', webhookLimit, express.raw({ type: 'application/json', limit: '1mb' }), async (request, response) => {
+  if (!isOnlinePaymentEnabled()) {
+    response.status(503).json({ error: { code: 'ONLINE_PAYMENT_DISABLED', message: 'Online payment processing is currently disabled.' } })
+    return
+  }
   const secret = process.env.STRIPE_WEBHOOK_SECRET
   const signature = request.get('stripe-signature')
   if (!secret) {
@@ -67,7 +77,7 @@ router.post('/webhook', webhookLimit, express.raw({ type: 'application/json', li
     return
   }
   try {
-    if ((event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') && session.payment_status === 'paid') {
+    if (isConfirmedStripePayment(event.type, session.payment_status)) {
       const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id ?? ''
       await markOrderPaid(orderId, paymentIntentId)
     } else if (event.type === 'checkout.session.expired' || event.type === 'checkout.session.async_payment_failed') {

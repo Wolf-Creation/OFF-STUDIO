@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import { assertVerifiedStagingSeed } from './runtimeConfig.js'
 import { Category } from './models/Category.js'
 import { Collection } from './models/Collection.js'
 import { Customer } from './models/Customer.js'
@@ -53,6 +54,10 @@ const demoOrders = [
 ] as const
 
 export async function seedDemoData() {
+  if (process.env.NODE_ENV === 'staging') {
+    assertVerifiedStagingSeed(process.env)
+  }
+
   let seededCategories = 0
   let seededCollections = 0
   let seededProducts = 0

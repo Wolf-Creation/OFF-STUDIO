@@ -6,12 +6,20 @@ build/
 **/build/
 coverage/
 **/coverage/
+test-results/
+playwright-report/
 .turbo/
 .vite/
 .cache/
 apps/api/uploads/
+e2e/staging/test-results/
+e2e/staging/playwright-report/
 
 .env
+.env.development
+.env.test
+.env.staging
+.env.production
 .env.*
 !.env.example
 !.env.*.example

@@ -13,6 +13,15 @@
     "dev:storefront": "npm run dev --workspace @off/storefront",
     "dev:admin": "npm run dev --workspace @off/admin",
     "dev:api": "npm run dev --workspace @off/api",
-    "build": "npm run build --workspace @off/storefront && npm run build --workspace @off/admin && npm run build --workspace @off/api"
+    "build": "npm run build --workspace @off/storefront && npm run build --workspace @off/admin && npm run build --workspace @off/api",
+    "test": "pnpm --filter @off/api test",
+    "test:e2e": "playwright test --config=e2e/staging/playwright.config.ts",
+    "test:e2e:analytics-ui": "playwright test --config=e2e/analytics-ui.config.ts",
+    "test:e2e:staging": "playwright test --config=e2e/staging/playwright.config.ts && pnpm --filter @off/api test",
+    "test:e2e:staging:report": "playwright show-report e2e/staging/playwright-report",
+    "test:e2e:staging:smoke": "playwright test --config=e2e/staging/playwright.config.ts --grep \"@smoke\" && pnpm --filter @off/api test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0"
   }
 }
